@@ -40,4 +40,16 @@ pub struct Args {
 
     #[arg(long, default_value_t = -120, allow_hyphen_values = true)]
     pub end_offset: i64,
+
+    #[arg(long)]
+    pub start_roi: Option<String>,
+
+    #[arg(long)]
+    pub end_roi: Option<String>,
+
+    #[arg(long)]
+    pub win_roi: Option<String>,
+
+    #[arg(long)]
+    pub lose_roi: Option<String>,
 }

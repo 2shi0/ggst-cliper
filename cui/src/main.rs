@@ -18,7 +18,7 @@ use ffmpeg::{
     check_and_install_ffmpeg, export_segments_ffmpeg, find_exact_boundary, find_match_result, get_video_duration,
     get_video_info,
 };
-use image_proc::{compute_similarity_zero_copy, extract_roi, get_roi_bbox, compute_template_stats};
+use image_proc::{compute_similarity_zero_copy, extract_roi, compute_template_stats};
 use types::{BBox, SearchState, Segment};
 use utils::{format_duration, pause, resolve_template_path};
 
@@ -78,8 +78,27 @@ fn main() {
     println!("[Input Video]: {}", input_path);
     println!("[Output Directory]: {}", output_dir.display());
 
+    let parse_roi = |s: Option<&String>| -> Option<BBox> {
+        if let Some(s) = s {
+            let parts: Vec<&str> = s.split(',').collect();
+            if parts.len() == 4 {
+                if let (Ok(x), Ok(y), Ok(w), Ok(h)) = (
+                    parts[0].parse::<u32>(),
+                    parts[1].parse::<u32>(),
+                    parts[2].parse::<u32>(),
+                    parts[3].parse::<u32>(),
+                ) {
+                    if w > 0 && h > 0 {
+                        return Some(BBox::new(x, y, w, h));
+                    }
+                }
+            }
+        }
+        None
+    };
+
     // 1. ROI Calculation
-    println!("\nCalculating ROI for start template: {}", start_tmpl_path);
+    println!("\nLoading start template: {}", start_tmpl_path);
     let start_img = match image::open(&start_tmpl_path) {
         Ok(img) => img,
         Err(e) => {
@@ -88,17 +107,10 @@ fn main() {
             return;
         }
     };
-    let start_bbox = match get_roi_bbox(&start_img) {
-        Some(bbox) => bbox,
-        None => {
-            println!("Error: No non-white region found in start template");
-            pause();
-            return;
-        }
-    };
+    let start_bbox = parse_roi(args.start_roi.as_ref()).unwrap_or_else(|| BBox::new(0, 0, start_img.width(), start_img.height()));
     println!("Start ROI (x,y,w,h): {:?}", start_bbox);
 
-    println!("Calculating ROI for end template: {}", end_tmpl_path);
+    println!("Loading end template: {}", end_tmpl_path);
     let end_img = match image::open(&end_tmpl_path) {
         Ok(img) => img,
         Err(e) => {
@@ -107,14 +119,7 @@ fn main() {
             return;
         }
     };
-    let end_bbox = match get_roi_bbox(&end_img) {
-        Some(bbox) => bbox,
-        None => {
-            println!("Error: No non-white region found in end template");
-            pause();
-            return;
-        }
-    };
+    let end_bbox = parse_roi(args.end_roi.as_ref()).unwrap_or_else(|| BBox::new(0, 0, end_img.width(), end_img.height()));
     println!("End ROI (x,y,w,h): {:?}", end_bbox);
 
     // 2. Crop Templates
@@ -138,13 +143,15 @@ fn main() {
     let (mut win_bbox_opt, mut win_tmpl_opt, mut win_stats_opt) = (None, None, None);
     if Path::new(&win_tmpl_path).exists() {
         if let Ok(img) = image::open(&win_tmpl_path) {
-            if let Some(bbox) = get_roi_bbox(&img) {
+            if let Some(bbox) = parse_roi(args.win_roi.as_ref()) {
                 let tmpl = extract_roi(img.to_rgb8().as_raw(), img.width(), img.height(), bbox);
                 let stats = compute_template_stats(&tmpl);
                 win_bbox_opt = Some(bbox);
                 win_tmpl_opt = Some(tmpl);
                 win_stats_opt = Some(stats);
                 println!("Win ROI (x,y,w,h): {:?}", bbox);
+            } else {
+                println!("Win ROI not set or invalid (0,0,0,0). Win detection skipped.");
             }
         }
     } else {
@@ -154,13 +161,15 @@ fn main() {
     let (mut lose_bbox_opt, mut lose_tmpl_opt, mut lose_stats_opt) = (None, None, None);
     if Path::new(&lose_tmpl_path).exists() {
         if let Ok(img) = image::open(&lose_tmpl_path) {
-            if let Some(bbox) = get_roi_bbox(&img) {
+            if let Some(bbox) = parse_roi(args.lose_roi.as_ref()) {
                 let tmpl = extract_roi(img.to_rgb8().as_raw(), img.width(), img.height(), bbox);
                 let stats = compute_template_stats(&tmpl);
                 lose_bbox_opt = Some(bbox);
                 lose_tmpl_opt = Some(tmpl);
                 lose_stats_opt = Some(stats);
                 println!("Lose ROI (x,y,w,h): {:?}", bbox);
+            } else {
+                println!("Lose ROI not set or invalid (0,0,0,0). Lose detection skipped.");
             }
         }
     } else {
@@ -397,10 +406,10 @@ fn main() {
     let status = child.wait();
     if frames_processed == 0 {
         println!("\n[!] Error: No frames were read from FFmpeg. FFmpeg process may have exited prematurely.");
-        if let Ok(s) = status {
-            if !s.success() {
-                println!("[!] FFmpeg exit status: {}", s);
-            }
+    }
+    if let Ok(s) = status {
+        if !s.success() {
+            println!("\n[!] FFmpeg main process exited with status: {}", s);
         }
     }
 

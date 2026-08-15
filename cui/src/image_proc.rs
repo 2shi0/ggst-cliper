@@ -1,38 +1,7 @@
 use crate::types::BBox;
-use image::{DynamicImage, GenericImageView, Rgba};
 
 
-pub fn get_roi_bbox(img: &DynamicImage) -> Option<BBox> {
-    let mut x_min = u32::MAX;
-    let mut x_max = 0;
-    let mut y_min = u32::MAX;
-    let mut y_max = 0;
-    let mut found = false;
 
-    let has_alpha = img.color().has_alpha();
-    for (x, y, pixel) in img.pixels() {
-        let Rgba([r, g, b, a]) = pixel;
-        let is_non_white = if has_alpha {
-            a > 0 && !(r >= 250 && g >= 250 && b >= 250)
-        } else {
-            !(r >= 250 && g >= 250 && b >= 250)
-        };
-
-        if is_non_white {
-            x_min = x_min.min(x);
-            x_max = x_max.max(x);
-            y_min = y_min.min(y);
-            y_max = y_max.max(y);
-            found = true;
-        }
-    }
-
-    if found {
-        Some(BBox::new(x_min, y_min, x_max - x_min + 1, y_max - y_min + 1))
-    } else {
-        None
-    }
-}
 
 pub fn extract_roi(buffer: &[u8], buf_w: u32, buf_h: u32, bbox: BBox) -> Vec<u8> {
     let mut roi = Vec::with_capacity((bbox.width * bbox.height * 3) as usize);

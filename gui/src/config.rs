@@ -1,7 +1,7 @@
 use ini::Ini;
 use std::path::PathBuf;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct AppConfig {
     pub start_template: String,
     pub end_template: String,
@@ -12,6 +12,10 @@ pub struct AppConfig {
     pub start_offset: i32,
     pub end_offset: i32,
     pub output_dir: String,
+    pub start_roi: [u32; 4],
+    pub end_roi: [u32; 4],
+    pub win_roi: [u32; 4],
+    pub lose_roi: [u32; 4],
 }
 
 impl Default for AppConfig {
@@ -26,6 +30,10 @@ impl Default for AppConfig {
             start_offset: 0,
             end_offset: -120,
             output_dir: "".to_string(),
+            start_roi: [0, 0, 0, 0],
+            end_roi: [0, 0, 0, 0],
+            win_roi: [0, 0, 0, 0],
+            lose_roi: [0, 0, 0, 0],
         }
     }
 }
@@ -71,6 +79,23 @@ impl AppConfig {
                     if let Ok(v) = val.parse::<i32>() { config.end_offset = v; } 
                 }
                 if let Some(val) = section.get("output_dir") { config.output_dir = val.to_string(); }
+
+                let parse_roi = |s: &str| -> Option<[u32; 4]> {
+                    let parts: Vec<&str> = s.split(',').collect();
+                    if parts.len() == 4 {
+                        let mut arr = [0; 4];
+                        for i in 0..4 {
+                            arr[i] = parts[i].trim().parse::<u32>().ok()?;
+                        }
+                        return Some(arr);
+                    }
+                    None
+                };
+
+                if let Some(val) = section.get("start_roi") { if let Some(arr) = parse_roi(val) { config.start_roi = arr; } }
+                if let Some(val) = section.get("end_roi") { if let Some(arr) = parse_roi(val) { config.end_roi = arr; } }
+                if let Some(val) = section.get("win_roi") { if let Some(arr) = parse_roi(val) { config.win_roi = arr; } }
+                if let Some(val) = section.get("lose_roi") { if let Some(arr) = parse_roi(val) { config.lose_roi = arr; } }
             }
         }
         config
@@ -88,7 +113,11 @@ impl AppConfig {
             .set("step_frames", self.step_frames.to_string())
             .set("start_offset", self.start_offset.to_string())
             .set("end_offset", self.end_offset.to_string())
-            .set("output_dir", &self.output_dir);
+            .set("output_dir", &self.output_dir)
+            .set("start_roi", format!("{},{},{},{}", self.start_roi[0], self.start_roi[1], self.start_roi[2], self.start_roi[3]))
+            .set("end_roi", format!("{},{},{},{}", self.end_roi[0], self.end_roi[1], self.end_roi[2], self.end_roi[3]))
+            .set("win_roi", format!("{},{},{},{}", self.win_roi[0], self.win_roi[1], self.win_roi[2], self.win_roi[3]))
+            .set("lose_roi", format!("{},{},{},{}", self.lose_roi[0], self.lose_roi[1], self.lose_roi[2], self.lose_roi[3]));
         
         let _ = conf.write_to_file(&path);
     }

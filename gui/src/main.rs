@@ -8,19 +8,33 @@ use rfd::FileDialog;
 use std::path::Path;
 use std::process::Command;
 
+struct RoiSelectionState {
+    template_type: String,
+    image_path: String,
+    rect: Option<egui::Rect>,
+    drag_start: Option<egui::Pos2>,
+}
+
 struct GgstClipApp {
     config: AppConfig,
     show_settings: bool,
     status_message: String,
+    roi_selection: Option<RoiSelectionState>,
+    show_close_dialog: bool,
+    saved_config: AppConfig,
 }
 
 impl GgstClipApp {
     fn new(cc: &eframe::CreationContext<'_>) -> Self {
         egui_extras::install_image_loaders(&cc.egui_ctx);
+        let config = AppConfig::load();
         Self {
-            config: AppConfig::load(),
+            saved_config: config.clone(),
+            config,
             show_settings: false,
             status_message: String::new(),
+            roi_selection: None,
+            show_close_dialog: false,
         }
     }
 
@@ -45,10 +59,16 @@ impl GgstClipApp {
         cmd.arg("--step-frames").arg(self.config.step_frames.to_string());
         cmd.arg("--start-offset").arg(self.config.start_offset.to_string());
         cmd.arg("--end-offset").arg(self.config.end_offset.to_string());
+        
+        let format_roi = |r: [u32; 4]| format!("{},{},{},{}", r[0], r[1], r[2], r[3]);
+        cmd.arg("--start-roi").arg(format_roi(self.config.start_roi));
+        cmd.arg("--end-roi").arg(format_roi(self.config.end_roi));
+        cmd.arg("--win-roi").arg(format_roi(self.config.win_roi));
+        cmd.arg("--lose-roi").arg(format_roi(self.config.lose_roi));
 
         match cmd.spawn() {
             Ok(_) => {
-                self.status_message = format!("CLI process started from: {}", cli_path.display());
+                self.status_message = String::new();
             }
             Err(e) => {
                 self.status_message = format!("Failed to start {}: {}", cli_path.display(), e);
@@ -110,7 +130,33 @@ impl GgstClipApp {
                 );
 
                 if ctx.input(|i| i.viewport().close_requested()) {
-                    show = false;
+                    if self.config != self.saved_config {
+                        ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+                        self.show_close_dialog = true;
+                    } else {
+                        show = false;
+                    }
+                }
+
+                if self.show_close_dialog {
+                    egui::Window::new("Confirmation")
+                        .collapsible(false)
+                        .resizable(false)
+                        .show(ctx, |ui| {
+                            ui.label("設定値を保存する？");
+                            ui.horizontal(|ui| {
+                                if ui.button("Yes").clicked() {
+                                    self.save_settings();
+                                    self.show_close_dialog = false;
+                                    show = false;
+                                }
+                                if ui.button("No").clicked() {
+                                    self.config = self.saved_config.clone();
+                                    self.show_close_dialog = false;
+                                    show = false;
+                                }
+                            });
+                        });
                 }
 
                 egui::CentralPanel::default()
@@ -133,9 +179,10 @@ impl GgstClipApp {
                             ui.add_space(10.0);
                             ui.label("Templates:");
                             
-                            let mut pick_image = |label: &str, field: &mut String, default_name: &str| {
+                            let mut open_roi_selection = None;
+                            let mut pick_image = |label: &str, template_type: &str, field: &mut String, roi: &mut [u32; 4], default_name: &str| {
                                 let file_exists = !field.is_empty() && std::path::Path::new(field).exists();
-                                ui.allocate_ui_with_layout(egui::vec2(171.0, 20.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                                ui.allocate_ui_with_layout(egui::vec2(300.0, 20.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
                                     ui.label(label);
                                     if file_exists {
                                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -144,6 +191,22 @@ impl GgstClipApp {
                                                 let _ = std::fs::remove_file(&*field);
                                                 ui.ctx().forget_image(&image_path);
                                                 field.clear();
+                                                *roi = [0, 0, 0, 0];
+                                            }
+                                            if ui.button("Select Area").clicked() {
+                                                open_roi_selection = Some(RoiSelectionState {
+                                                    template_type: template_type.to_string(),
+                                                    image_path: field.clone(),
+                                                    rect: if roi[2] > 0 && roi[3] > 0 {
+                                                        Some(egui::Rect::from_min_size(
+                                                            egui::pos2(roi[0] as f32, roi[1] as f32),
+                                                            egui::vec2(roi[2] as f32, roi[3] as f32),
+                                                        ))
+                                                    } else {
+                                                        None
+                                                    },
+                                                    drag_start: None,
+                                                });
                                             }
                                         });
                                     }
@@ -161,9 +224,32 @@ impl GgstClipApp {
                                             .fit_to_exact_size(egui::vec2(171.0, 96.0))
                                             .sense(egui::Sense::click())
                                     );
+                                    if roi[2] > 0 && roi[3] > 0 {
+                                        if let Ok((img_w, img_h)) = image::image_dimensions(&*field) {
+                                            let scale_x = 171.0 / img_w as f32;
+                                            let scale_y = 96.0 / img_h as f32;
+                                            let rx = img_response.rect.min.x + roi[0] as f32 * scale_x;
+                                            let ry = img_response.rect.min.y + roi[1] as f32 * scale_y;
+                                            let rw = roi[2] as f32 * scale_x;
+                                            let rh = roi[3] as f32 * scale_y;
+                                            
+                                            let c = egui::Color32::from_white_alpha(80);
+                                            let img_rect = img_response.rect;
+                                            let roi_rect = egui::Rect::from_min_size(egui::pos2(rx, ry), egui::vec2(rw, rh));
+                                            
+                                            ui.painter().rect_filled(egui::Rect::from_min_max(img_rect.min, egui::pos2(img_rect.max.x, roi_rect.min.y)), 0.0, c); // Top
+                                            ui.painter().rect_filled(egui::Rect::from_min_max(egui::pos2(img_rect.min.x, roi_rect.max.y), img_rect.max), 0.0, c); // Bottom
+                                            ui.painter().rect_filled(egui::Rect::from_min_max(egui::pos2(img_rect.min.x, roi_rect.min.y), egui::pos2(roi_rect.min.x, roi_rect.max.y)), 0.0, c); // Left
+                                            ui.painter().rect_filled(egui::Rect::from_min_max(egui::pos2(roi_rect.max.x, roi_rect.min.y), egui::pos2(img_rect.max.x, roi_rect.max.y)), 0.0, c); // Right
+                                        }
+                                    }
                                     if img_response.clicked() {
                                         request_pick = true;
                                     }
+                                }
+
+                                if file_exists {
+                                    ui.label(format!("ROI: [{}, {}, {}, {}]", roi[0], roi[1], roi[2], roi[3]));
                                 }
 
                                 if request_pick {
@@ -183,15 +269,20 @@ impl GgstClipApp {
                                         } else {
                                             *field = path.to_string_lossy().to_string();
                                         }
+                                        *roi = [0, 0, 0, 0]; // Reset ROI on new image
                                     }
                                 }
                                 ui.add_space(5.0);
                             };
 
-                            pick_image("Start Template:", &mut self.config.start_template, "start.png");
-                            pick_image("End Template:", &mut self.config.end_template, "end.png");
-                            pick_image("Win Template:", &mut self.config.win_template, "win.png");
-                            pick_image("Lose Template:", &mut self.config.lose_template, "lose.png");
+                            pick_image("Start Template:", "start", &mut self.config.start_template, &mut self.config.start_roi, "start.png");
+                            pick_image("End Template:", "end", &mut self.config.end_template, &mut self.config.end_roi, "end.png");
+                            pick_image("Win Template:", "win", &mut self.config.win_template, &mut self.config.win_roi, "win.png");
+                            pick_image("Lose Template:", "lose", &mut self.config.lose_template, &mut self.config.lose_roi, "lose.png");
+
+                            if let Some(state) = open_roi_selection {
+                                self.roi_selection = Some(state);
+                            }
 
                             ui.add_space(10.0);
                             ui.label("Parameters:");
@@ -256,6 +347,136 @@ impl GgstClipApp {
 
         self.show_settings = show;
     }
+
+    fn render_roi_window(&mut self, ctx: &egui::Context) {
+        let mut close_window = false;
+        let mut save_rect = None;
+
+        if let Some(state) = &mut self.roi_selection {
+            let (img_w, img_h) = image::image_dimensions(&state.image_path).unwrap_or((800, 600));
+
+            let builder = egui::ViewportBuilder::default()
+                .with_title(format!("Select Area for {}", state.template_type))
+                .with_inner_size([img_w as f32, img_h as f32 + 35.0])
+                .with_resizable(false);
+
+            ctx.show_viewport_immediate(
+                egui::ViewportId::from_hash_of("roi_selection_window"),
+                builder,
+                |ctx, _class| {
+                    if ctx.input(|i| i.viewport().close_requested()) {
+                        close_window = true;
+                    }
+
+                    egui::TopBottomPanel::bottom("roi_bottom_panel").show(ctx, |ui| {
+                        ui.horizontal(|ui| {
+                            if ui.button("Confirm").clicked() {
+                                if let Some(rect) = state.rect {
+                                    save_rect = Some(rect);
+                                }
+                                close_window = true;
+                            }
+                            if ui.button("Cancel").clicked() {
+                                close_window = true;
+                            }
+                            if let Some(rect) = state.rect {
+                                ui.label(format!("Selected: x: {}, y: {}, w: {}, h: {}", 
+                                    rect.min.x.max(0.0) as u32, 
+                                    rect.min.y.max(0.0) as u32, 
+                                    rect.width().max(0.0) as u32, 
+                                    rect.height().max(0.0) as u32));
+                            } else {
+                                ui.label("Drag on the image to select an area.");
+                            }
+                        });
+                    });
+
+                    egui::CentralPanel::default()
+                        .frame(egui::Frame::central_panel(&ctx.style()).inner_margin(0.0))
+                        .show(ctx, |ui| {
+                            let image_path = format!("file://{}", state.image_path.replace('\\', "/"));
+                            let image = egui::Image::new(&image_path);
+                            
+                            let response = ui.add(image.sense(egui::Sense::click_and_drag()));
+                            let rect = response.rect;
+
+                            // Handle drag
+                            if response.drag_started() {
+                                if let Some(pos) = response.interact_pointer_pos() {
+                                    state.drag_start = Some(pos - rect.min.to_vec2());
+                                    state.rect = None;
+                                }
+                            }
+
+                            if response.dragged() {
+                                if let (Some(start_pos_rel), Some(current_pos)) = (state.drag_start, response.interact_pointer_pos()) {
+                                    let current_pos_rel = current_pos - rect.min.to_vec2();
+                                    
+                                    let min_x = start_pos_rel.x.min(current_pos_rel.x);
+                                    let min_y = start_pos_rel.y.min(current_pos_rel.y);
+                                    let max_x = start_pos_rel.x.max(current_pos_rel.x);
+                                    let max_y = start_pos_rel.y.max(current_pos_rel.y);
+
+                                    // Constrain to image bounds
+                                    let min_x = min_x.clamp(0.0, rect.width());
+                                    let min_y = min_y.clamp(0.0, rect.height());
+                                    let max_x = max_x.clamp(0.0, rect.width());
+                                    let max_y = max_y.clamp(0.0, rect.height());
+
+                                    state.rect = Some(egui::Rect::from_min_max(
+                                        egui::pos2(min_x, min_y),
+                                        egui::pos2(max_x, max_y)
+                                    ));
+                                }
+                            }
+
+                            // Draw rectangle
+                            let c = egui::Color32::from_white_alpha(80);
+                            if let Some(selection_rect_rel) = state.rect {
+                                let mut abs_rect = selection_rect_rel;
+                                abs_rect.min += rect.min.to_vec2();
+                                abs_rect.max += rect.min.to_vec2();
+                                
+                                ui.painter().rect_filled(egui::Rect::from_min_max(rect.min, egui::pos2(rect.max.x, abs_rect.min.y)), 0.0, c); // Top
+                                ui.painter().rect_filled(egui::Rect::from_min_max(egui::pos2(rect.min.x, abs_rect.max.y), rect.max), 0.0, c); // Bottom
+                                ui.painter().rect_filled(egui::Rect::from_min_max(egui::pos2(rect.min.x, abs_rect.min.y), egui::pos2(abs_rect.min.x, abs_rect.max.y)), 0.0, c); // Left
+                                ui.painter().rect_filled(egui::Rect::from_min_max(egui::pos2(abs_rect.max.x, abs_rect.min.y), egui::pos2(rect.max.x, abs_rect.max.y)), 0.0, c); // Right
+
+                                ui.painter().rect_stroke(
+                                    abs_rect,
+                                    0.0,
+                                    egui::Stroke::new(2.0_f32, egui::Color32::RED),
+                                );
+                            } else {
+                                ui.painter().rect_filled(rect, 0.0, c);
+                            }
+                        });
+                }
+            );
+        }
+
+        if let Some(rect) = save_rect {
+            if let Some(state) = &self.roi_selection {
+                let x = rect.min.x.max(0.0) as u32;
+                let y = rect.min.y.max(0.0) as u32;
+                let w = rect.width().max(0.0) as u32;
+                let h = rect.height().max(0.0) as u32;
+                let roi = [x, y, w, h];
+
+                match state.template_type.as_str() {
+                    "start" => self.config.start_roi = roi,
+                    "end" => self.config.end_roi = roi,
+                    "win" => self.config.win_roi = roi,
+                    "lose" => self.config.lose_roi = roi,
+                    _ => {}
+                }
+            }
+        }
+
+        if close_window {
+            self.roi_selection = None;
+        }
+    }
 }
 
 impl eframe::App for GgstClipApp {
@@ -279,6 +500,7 @@ impl eframe::App for GgstClipApp {
                 ui.add_space(20.0);
 
                 if ui.add_sized(button_size, egui::Button::new(egui::RichText::new("Settings").size(24.0))).clicked() {
+                    self.saved_config = self.config.clone();
                     self.show_settings = true;
                 }
 
@@ -301,6 +523,10 @@ impl eframe::App for GgstClipApp {
 
         if self.show_settings {
             self.render_settings_window(ctx);
+        }
+
+        if self.roi_selection.is_some() {
+            self.render_roi_window(ctx);
         }
     }
 }
