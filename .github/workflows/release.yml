@@ -1,0 +1,41 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*' # v1.0.0 のようなタグがPushされたときに実行されます
+
+permissions:
+  contents: write # GitHub Releasesへのアップロードに必要な権限
+
+jobs:
+  build-and-release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          target: x86_64-pc-windows-msvc
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build workspace (GUI and CUI)
+        run: cargo build --release
+
+      - name: Compile Inno Setup Script
+        uses: amadeusk/inno-setup-action@v2.0.0
+        with:
+          filepath: ./installer/setup.iss
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ./installer/Output/*.exe
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
