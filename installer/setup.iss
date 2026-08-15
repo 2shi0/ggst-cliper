@@ -1,8 +1,8 @@
-#define MyAppName "ggst-clip"
-#define MyAppVersion "0.1.0"
+#define MyAppName "ggst-clipper"
+#define MyAppVersion "0.1.2"
 #define MyAppPublisher "Naoya"
-#define GuiExeName "ggst-clip-gui.exe"
-#define CuiExeName "ggst-clip-rust.exe"
+#define GuiExeName "ggst-clipper.exe"
+#define CuiExeName "ggst-clipper-cui.exe"
 
 [Setup]
 ; NOTE: The value of AppId uniquely identifies this application.
@@ -17,7 +17,7 @@ DefaultDirName={autopf}\{#MyAppName}
 DisableProgramGroupPage=yes
 ; 成果物(Setup.exe)の出力先 (installerディレクトリ直下のOutputフォルダ)
 OutputDir=Output
-OutputBaseFilename=ggst-clip-setup
+OutputBaseFilename=ggst-clipper-setup
 Compression=lzma
 SolidCompression=yes
 WizardStyle=modern

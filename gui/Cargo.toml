@@ -1,6 +1,6 @@
 [package]
-name = "ggst-clip-gui"
-version = "0.1.0"
+name = "ggst-clipper"
+version = "0.1.2"
 edition = "2024"
 
 [dependencies]

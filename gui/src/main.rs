@@ -27,8 +27,8 @@ impl GgstClipApp {
     fn run_cli(&mut self, video_path: &str) {
         let cli_path = std::env::current_exe()
             .ok()
-            .and_then(|p| p.parent().map(|dir| dir.join("ggst-clip.exe")))
-            .unwrap_or_else(|| std::path::PathBuf::from("ggst-clip.exe"));
+            .and_then(|p| p.parent().map(|dir| dir.join("ggst-clipper-cui.exe")))
+            .unwrap_or_else(|| std::path::PathBuf::from("ggst-clipper-cui.exe"));
         let mut cmd = Command::new(&cli_path);
         cmd.arg("-i").arg(video_path);
 
@@ -134,9 +134,10 @@ impl GgstClipApp {
                             ui.label("Templates:");
                             
                             let mut pick_image = |label: &str, field: &mut String, default_name: &str| {
+                                let file_exists = !field.is_empty() && std::path::Path::new(field).exists();
                                 ui.allocate_ui_with_layout(egui::vec2(171.0, 20.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
                                     ui.label(label);
-                                    if !field.is_empty() {
+                                    if file_exists {
                                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                             if ui.button("Remove").clicked() {
                                                 let image_path = format!("file://{}", field.replace('\\', "/"));
@@ -149,7 +150,7 @@ impl GgstClipApp {
                                 });
 
                                 let mut request_pick = false;
-                                if field.is_empty() {
+                                if !file_exists {
                                     if ui.add_sized([171.0, 96.0], egui::Button::new(egui::RichText::new("⚠ Select Image").color(egui::Color32::RED))).clicked() {
                                         request_pick = true;
                                     }
@@ -266,7 +267,7 @@ impl eframe::App for GgstClipApp {
 
                 let button_size = [250.0, 50.0];
 
-                if ui.add_sized(button_size, egui::Button::new("Select Video")).clicked() {
+                if ui.add_sized(button_size, egui::Button::new(egui::RichText::new("Select Video").size(24.0))).clicked() {
                     if let Some(path) = FileDialog::new()
                         .add_filter("Video Files", &["mp4", "mkv", "avi", "mov"])
                         .pick_file()
@@ -277,7 +278,7 @@ impl eframe::App for GgstClipApp {
 
                 ui.add_space(20.0);
 
-                if ui.add_sized(button_size, egui::Button::new("Settings")).clicked() {
+                if ui.add_sized(button_size, egui::Button::new(egui::RichText::new("Settings").size(24.0))).clicked() {
                     self.show_settings = true;
                 }
 
@@ -292,7 +293,7 @@ impl eframe::App for GgstClipApp {
                 ui.add_space(5.0);
                 ui.horizontal(|ui| {
                     ui.add_space(5.0);
-                    ui.hyperlink_to("Source code (Github)", "https://github.com/");
+                    ui.hyperlink_to("Source code (Github)", "https://github.com/2shi0/ggst-clipper");
                 });
             });
             }); // close add_enabled_ui
@@ -325,15 +326,20 @@ fn main() -> eframe::Result<()> {
     let native_options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([400.0, 250.0])
-            .with_title("ggst-clip")
+            .with_title("ggst-clipper")
             .with_resizable(false)
             .with_icon(load_icon()),
         ..Default::default()
     };
     eframe::run_native(
-        "ggst-clip",
+        "ggst-clipper",
         native_options,
-        Box::new(|cc| Ok(Box::new(GgstClipApp::new(cc)))),
+        Box::new(|cc| {
+            let mut visuals = egui::Visuals::dark();
+            visuals.override_text_color = Some(egui::Color32::from_gray(245));
+            cc.egui_ctx.set_visuals(visuals);
+            Ok(Box::new(GgstClipApp::new(cc)))
+        }),
     )
 }
 

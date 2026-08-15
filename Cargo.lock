@@ -1728,8 +1728,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "ggst-clip-gui"
-version = "0.1.0"
+name = "ggst-clipper"
+version = "0.1.2"
 dependencies = [
  "directories",
  "eframe",
@@ -1741,14 +1741,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "ggst-clip-rust"
-version = "0.1.0"
+name = "ggst-clipper-cui"
+version = "0.1.2"
 dependencies = [
  "clap",
  "image",
  "indicatif",
  "rfd 0.14.1",
- "winres",
 ]
 
 [[package]]

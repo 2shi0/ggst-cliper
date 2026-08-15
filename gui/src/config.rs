@@ -33,9 +33,9 @@ impl Default for AppConfig {
 impl AppConfig {
     pub fn config_dir() -> PathBuf {
         if let Some(base_dirs) = directories::BaseDirs::new() {
-            base_dirs.config_dir().join("ggst-clip")
+            base_dirs.config_dir().join("ggst-clipper")
         } else {
-            PathBuf::from("ggst-clip")
+            PathBuf::from("ggst-clipper")
         }
     }
 
