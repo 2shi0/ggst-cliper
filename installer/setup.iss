@@ -12,6 +12,7 @@ AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
 UninstallDisplayName={#MyAppName} v{#MyAppVersion}
+UninstallDisplayIcon={app}\icon.ico
 DefaultDirName={autopf}\{#MyAppName}
 DisableProgramGroupPage=yes
 ; 成果物(Setup.exe)の出力先 (installerディレクトリ直下のOutputフォルダ)
