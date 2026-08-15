@@ -19,7 +19,7 @@ use ffmpeg::{
     get_video_info,
 };
 use image_proc::{compute_similarity_zero_copy, extract_roi, get_roi_bbox, compute_template_stats};
-use types::{BBox, MatchResult, SearchState, Segment};
+use types::{BBox, SearchState, Segment};
 use utils::{format_duration, pause, resolve_template_path};
 
 fn main() {

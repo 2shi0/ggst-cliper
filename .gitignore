@@ -10,3 +10,4 @@ Cargo.lock.bk
 
 test.bin
 installer/Output/
+build_installer.ps1
