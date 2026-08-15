@@ -1734,6 +1734,7 @@ dependencies = [
  "directories",
  "eframe",
  "egui_extras",
+ "image",
  "rfd 0.15.4",
  "rust-ini",
  "winres",

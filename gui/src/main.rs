@@ -325,13 +325,13 @@ fn main() -> eframe::Result<()> {
     let native_options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([400.0, 250.0])
-            .with_title("ggst-clip GUI")
+            .with_title("ggst-clip")
             .with_resizable(false)
             .with_icon(load_icon()),
         ..Default::default()
     };
     eframe::run_native(
-        "ggst-clip GUI",
+        "ggst-clip",
         native_options,
         Box::new(|cc| Ok(Box::new(GgstClipApp::new(cc)))),
     )

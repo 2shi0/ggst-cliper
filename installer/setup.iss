@@ -27,7 +27,7 @@ SetupIconFile=..\assets\icon.ico
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
-Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
+Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
 
 [Files]
 ; ビルドされたGUIとCUIの実行ファイルを指定 (相対パス)
@@ -93,7 +93,7 @@ begin
   UninstallForm := TForm.Create(nil);
   try
     UninstallForm.Caption := 'Uninstall';
-    UninstallForm.ClientWidth := ScaleX(400);
+    UninstallForm.ClientWidth := ScaleX(450);
     UninstallForm.ClientHeight := ScaleY(150);
     UninstallForm.Position := poScreenCenter;
 
