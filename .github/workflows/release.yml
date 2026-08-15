@@ -29,9 +29,14 @@ jobs:
         run: cargo build --release
 
       - name: Compile Inno Setup Script
-        uses: amadeusk/inno-setup-action@v2.0.0
-        with:
-          filepath: ./installer/setup.iss
+        run: |
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          if (Test-Path $iscc) {
+            & $iscc .\installer\setup.iss
+          } else {
+            choco install innosetup -y
+            iscc .\installer\setup.iss
+          }
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
