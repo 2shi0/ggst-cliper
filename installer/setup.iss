@@ -45,6 +45,9 @@ Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#GuiExeName}"; Tasks: desk
 ; インストール完了後にGUIツールを起動するオプション
 Filename: "{app}\{#GuiExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
 
+[UninstallDelete]
+Type: filesandordirs; Name: "{app}"
+
 [Code]
 var
   DeleteAppData: Boolean;
