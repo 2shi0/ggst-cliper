@@ -22,7 +22,7 @@ SolidCompression=yes
 WizardStyle=modern
 
 [Languages]
-Name: "japanese"; MessagesFile: "compiler:Languages\Japanese.isl"
+Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
@@ -85,14 +85,14 @@ begin
 
   UninstallForm := TForm.Create(nil);
   try
-    UninstallForm.Caption := 'アンインストール';
+    UninstallForm.Caption := 'Uninstall';
     UninstallForm.ClientWidth := ScaleX(400);
     UninstallForm.ClientHeight := ScaleY(150);
     UninstallForm.Position := poScreenCenter;
 
     PromptLabel := TLabel.Create(UninstallForm);
     PromptLabel.Parent := UninstallForm;
-    PromptLabel.Caption := '{#MyAppName} とその関連コンポーネントをすべて削除しますか？';
+    PromptLabel.Caption := 'Are you sure you want to completely remove {#MyAppName} and all of its components?';
     PromptLabel.Left := ScaleX(20);
     PromptLabel.Top := ScaleY(20);
     PromptLabel.Width := UninstallForm.ClientWidth - ScaleX(40);
@@ -100,14 +100,14 @@ begin
 
     DataCheckBox := TNewCheckBox.Create(UninstallForm);
     DataCheckBox.Parent := UninstallForm;
-    DataCheckBox.Caption := '設定ファイルや履歴などのアプリケーションデータも削除する';
+    DataCheckBox.Caption := 'Also delete application data such as configuration files and history';
     DataCheckBox.Left := ScaleX(20);
     DataCheckBox.Top := ScaleY(60);
     DataCheckBox.Width := UninstallForm.ClientWidth - ScaleX(40);
 
     YesButton := TNewButton.Create(UninstallForm);
     YesButton.Parent := UninstallForm;
-    YesButton.Caption := 'はい(&Y)';
+    YesButton.Caption := '&Yes';
     YesButton.ModalResult := mrYes;
     YesButton.Default := True;
     YesButton.Width := ScaleX(80);
@@ -116,7 +116,7 @@ begin
 
     NoButton := TNewButton.Create(UninstallForm);
     NoButton.Parent := UninstallForm;
-    NoButton.Caption := 'いいえ(&N)';
+    NoButton.Caption := '&No';
     NoButton.ModalResult := mrNo;
     NoButton.Cancel := True;
     NoButton.Width := ScaleX(80);
@@ -151,6 +151,10 @@ begin
       begin
         DelTree(AppDataDir, True, True, True);
       end;
+    end;
+    if CmdLineParamExists('/RESTART') then
+    begin
+      MsgBox('Uninstall completed successfully.', mbInformation, MB_OK);
     end;
   end;
 end;

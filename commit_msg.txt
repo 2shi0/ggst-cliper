@@ -1,0 +1,7 @@
+chore: Inno Setupの言語設定を英語に変更
+
+- .gitignoreに GEMINI.md を追加
+- Inno Setup設定 (installer/setup.iss) の更新:
+  - 言語を日本語から英語 (Default.isl) に変更
+  - アンインストーラの確認プロンプトとボタンのテキストを英語に変更
+  - アンインストール完了時のメッセージボックス追加
