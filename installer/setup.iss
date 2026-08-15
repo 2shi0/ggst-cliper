@@ -32,11 +32,13 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 ; ビルドされたGUIとCUIの実行ファイルを指定 (相対パス)
 Source: "..\target\release\{#GuiExeName}"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\target\release\{#CuiExeName}"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\assets\icon.ico"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 ; スタートメニューとデスクトップにGUIツールのショートカットを作成
-Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#GuiExeName}"
-Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#GuiExeName}"; Tasks: desktopicon
+Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#GuiExeName}"; IconFilename: "{app}\icon.ico"
+Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#GuiExeName}"; Tasks: desktopicon; IconFilename: "{app}\icon.ico"
+
 
 [Run]
 ; インストール完了後にGUIツールを起動するオプション

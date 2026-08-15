@@ -304,12 +304,30 @@ impl eframe::App for GgstClipApp {
     }
 }
 
+fn load_icon() -> egui::IconData {
+    let (icon_rgba, icon_width, icon_height) = {
+        let image = image::load_from_memory(include_bytes!("../../assets/icon.png"))
+            .expect("Failed to open icon path")
+            .into_rgba8();
+        let (width, height) = image.dimensions();
+        let rgba = image.into_raw();
+        (rgba, width, height)
+    };
+
+    egui::IconData {
+        rgba: icon_rgba,
+        width: icon_width,
+        height: icon_height,
+    }
+}
+
 fn main() -> eframe::Result<()> {
     let native_options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([400.0, 250.0])
             .with_title("ggst-clip GUI")
-            .with_resizable(false),
+            .with_resizable(false)
+            .with_icon(load_icon()),
         ..Default::default()
     };
     eframe::run_native(
@@ -318,3 +336,4 @@ fn main() -> eframe::Result<()> {
         Box::new(|cc| Ok(Box::new(GgstClipApp::new(cc)))),
     )
 }
+
