@@ -7,10 +7,12 @@ pub struct AppConfig {
     pub end_template: String,
     pub win_template: String,
     pub lose_template: String,
+    pub detect_win_loss: bool,
     pub threshold: f32,
     pub step_frames: u32,
     pub start_offset: i32,
     pub end_offset: i32,
+    pub win_offset: u32,
     pub output_dir: String,
     pub start_roi: [u32; 4],
     pub end_roi: [u32; 4],
@@ -25,10 +27,12 @@ impl Default for AppConfig {
             end_template: "end.png".to_string(),
             win_template: "win.png".to_string(),
             lose_template: "lose.png".to_string(),
+            detect_win_loss: true,
             threshold: 0.9,
             step_frames: 60,
             start_offset: 0,
             end_offset: -120,
+            win_offset: 180,
             output_dir: "".to_string(),
             start_roi: [0, 0, 0, 0],
             end_roi: [0, 0, 0, 0],
@@ -65,6 +69,9 @@ impl AppConfig {
                 if let Some(val) = section.get("end_template") { config.end_template = val.to_string(); }
                 if let Some(val) = section.get("win_template") { config.win_template = val.to_string(); }
                 if let Some(val) = section.get("lose_template") { config.lose_template = val.to_string(); }
+                if let Some(val) = section.get("detect_win_loss") {
+                    if let Ok(v) = val.parse::<bool>() { config.detect_win_loss = v; }
+                }
                 
                 if let Some(val) = section.get("threshold") { 
                     if let Ok(v) = val.parse::<f32>() { config.threshold = v; } 
@@ -77,6 +84,9 @@ impl AppConfig {
                 }
                 if let Some(val) = section.get("end_offset") { 
                     if let Ok(v) = val.parse::<i32>() { config.end_offset = v; } 
+                }
+                if let Some(val) = section.get("win_offset") { 
+                    if let Ok(v) = val.parse::<u32>() { config.win_offset = v; } 
                 }
                 if let Some(val) = section.get("output_dir") { config.output_dir = val.to_string(); }
 
@@ -109,10 +119,12 @@ impl AppConfig {
             .set("end_template", &self.end_template)
             .set("win_template", &self.win_template)
             .set("lose_template", &self.lose_template)
+            .set("detect_win_loss", self.detect_win_loss.to_string())
             .set("threshold", self.threshold.to_string())
             .set("step_frames", self.step_frames.to_string())
             .set("start_offset", self.start_offset.to_string())
             .set("end_offset", self.end_offset.to_string())
+            .set("win_offset", self.win_offset.to_string())
             .set("output_dir", &self.output_dir)
             .set("start_roi", format!("{},{},{},{}", self.start_roi[0], self.start_roi[1], self.start_roi[2], self.start_roi[3]))
             .set("end_roi", format!("{},{},{},{}", self.end_roi[0], self.end_roi[1], self.end_roi[2], self.end_roi[3]))

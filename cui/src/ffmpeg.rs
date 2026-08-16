@@ -150,7 +150,6 @@ pub fn find_exact_boundary(
 pub fn find_match_result(
     input_path: &str,
     start_time: f64,
-    fps: f64,
     win_bbox: Option<BBox>,
     win_tmpl: Option<&[u8]>,
     win_stats: Option<&TemplateStats>,
@@ -158,12 +157,13 @@ pub fn find_match_result(
     lose_tmpl: Option<&[u8]>,
     lose_stats: Option<&TemplateStats>,
     threshold: f64,
+    win_offset: usize,
 ) -> MatchResult {
-    if win_bbox.is_none() && lose_bbox.is_none() {
+    if win_offset == 0 || (win_bbox.is_none() && lose_bbox.is_none()) {
         return MatchResult::Skipped;
     }
 
-    let num_frames = (3.0 * fps).round() as usize;
+    let num_frames = win_offset;
 
     let w_box = win_bbox.unwrap_or(BBox::new(0,0,0,0));
     let l_box = lose_bbox.unwrap_or(BBox::new(0,0,0,0));

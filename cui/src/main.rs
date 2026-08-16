@@ -362,7 +362,6 @@ fn main() {
                     let match_result = find_match_result(
                         &input_path,
                         exact_time,
-                        video_info.fps,
                         win_bbox_opt,
                         win_tmpl_opt.as_deref(),
                         win_stats_opt.as_ref(),
@@ -370,6 +369,7 @@ fn main() {
                         lose_tmpl_opt.as_deref(),
                         lose_stats_opt.as_ref(),
                         args.threshold,
+                        args.win_offset,
                     );
 
                     pb.suspend(|| {
