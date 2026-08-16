@@ -1,6 +1,6 @@
 <div align="center">
 
-  <img src="assets/icon.png" alt="ggst-clipper Logo" width="120" height="120" />
+  <img src="assets/icon.png" alt="ggst-clipper Logo" width="240" height="240" />
 
   # ggst-clipper
 
@@ -138,7 +138,7 @@ cargo build --release
 
 ## 📄 License / ライセンス
 
-このプロジェクトは **[WTFPL (Do What The Fuck You Want To Public License)](http://www.wtfpl.net/)** のもとで公開されています。
+このプロジェクトは **[WTFPL](http://www.wtfpl.net/)** のもとで公開されています。
 
 ```text
             DO WHAT THE FUCK YOU WANT TO PUBLIC LICENSE
