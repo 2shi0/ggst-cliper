@@ -1729,7 +1729,7 @@ dependencies = [
 
 [[package]]
 name = "ggst-clipper"
-version = "0.1.2"
+version = "0.1.4"
 dependencies = [
  "directories",
  "eframe",
@@ -1742,7 +1742,7 @@ dependencies = [
 
 [[package]]
 name = "ggst-clipper-cui"
-version = "0.1.2"
+version = "0.1.4"
 dependencies = [
  "clap",
  "image",

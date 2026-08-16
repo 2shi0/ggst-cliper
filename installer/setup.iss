@@ -1,5 +1,5 @@
 #define MyAppName "ggst-clipper"
-#define MyAppVersion "0.1.3"
+#define MyAppVersion "0.1.4"
 #define MyAppPublisher "Naoya"
 #define GuiExeName "ggst-clipper.exe"
 #define CuiExeName "ggst-clipper-cui.exe"
