@@ -11,14 +11,11 @@
   </p>
 
   <p align="center">
-    <a href="https://github.com/2shi0/ggst-cliper/releases"><img src="https://img.shields.io/github/v/release/2shi0/ggst-cliper?style=for-the-badge&logo=github&color=4CAF50" alt="Release" /></a>
-    <a href="https://github.com/2shi0/ggst-cliper/actions/workflows/release.yml"><img src="https://img.shields.io/github/actions/workflow/status/2shi0/ggst-cliper/release.yml?style=for-the-badge&logo=githubactions&logoColor=white&label=Build" alt="Build Status" /></a>
-    <a href="http://www.wtfpl.net/"><img src="https://img.shields.io/badge/License-WTFPL-brightgreen.svg?style=for-the-badge" alt="License: WTFPL" /></a>
-  </p>
-
-  <p align="center">
-    <a href="https://github.com/2shi0/ggst-cliper/stargazers"><img src="https://img.shields.io/github/stars/2shi0/ggst-cliper?style=for-the-badge&logo=apachespark&color=f5c518" alt="Stars" /></a>
-    <a href="https://github.com/2shi0/ggst-cliper/releases"><img src="https://img.shields.io/github/downloads/2shi0/ggst-cliper/total?style=for-the-badge&logo=github&color=blueviolet" alt="Downloads" /></a>
+    <a href="https://github.com/2shi0/ggst-cliper/releases"><img src="https://img.shields.io/github/v/release/2shi0/ggst-cliper?logo=github" alt="Release" /></a>
+    <a href="https://github.com/2shi0/ggst-cliper/actions/workflows/release.yml"><img src="https://img.shields.io/github/actions/workflow/status/2shi0/ggst-cliper/release.yml?logo=githubactions&logoColor=white&label=Build" alt="Build Status" /></a>
+    <a href="https://github.com/2shi0/ggst-cliper/releases"><img src="https://img.shields.io/github/downloads/2shi0/ggst-cliper/total?logo=github" alt="Downloads" /></a>
+    <a href="https://github.com/2shi0/ggst-cliper/stargazers"><img src="https://img.shields.io/github/stars/2shi0/ggst-cliper?logo=github" alt="Stars" /></a>
+    <a href="http://www.wtfpl.net/"><img src="https://img.shields.io/badge/License-WTFPL-brightgreen.svg" alt="License: WTFPL" /></a>
   </p>
 
 </div>
