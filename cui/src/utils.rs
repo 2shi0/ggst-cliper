@@ -12,6 +12,25 @@ pub fn resolve_template_path(tmpl_path: &str) -> String {
             if candidate.exists() {
                 return candidate.to_str().unwrap().to_string();
             }
+
+            let mut curr = exe_dir.parent();
+            for _ in 0..6 {
+                if let Some(dir) = curr {
+                    let c = dir.join(tmpl_path);
+                    if c.exists() {
+                        return c.to_str().unwrap().to_string();
+                    }
+                    curr = dir.parent();
+                } else {
+                    break;
+                }
+            }
+        }
+    }
+    if let Some(base_dirs) = directories::BaseDirs::new() {
+        let app_data_tmpl = base_dirs.config_dir().join("ggst-clipper").join(tmpl_path);
+        if app_data_tmpl.exists() {
+            return app_data_tmpl.to_str().unwrap().to_string();
         }
     }
     if p.exists() {

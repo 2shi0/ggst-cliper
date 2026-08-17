@@ -39,11 +39,13 @@ pub enum MatchResult {
     Skipped,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Segment {
     pub start: f64,
     pub end: f64,
     pub result: MatchResult,
+    pub p1_name: Option<String>,
+    pub p2_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy)]

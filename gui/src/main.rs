@@ -62,6 +62,7 @@ impl GgstClipApp {
         cmd.arg("--start-offset").arg(self.config.start_offset.to_string());
         cmd.arg("--end-offset").arg(self.config.end_offset.to_string());
         cmd.arg("--win-offset").arg(self.config.win_offset.to_string());
+        cmd.arg("--detect-characters").arg(self.config.detect_characters.to_string());
         
         let format_roi = |r: [u32; 4]| format!("{},{},{},{}", r[0], r[1], r[2], r[3]);
         cmd.arg("--start-roi").arg(format_roi(self.config.start_roi));
@@ -304,6 +305,15 @@ impl GgstClipApp {
                                     instant_tooltip(ui, "Number of frames to search for win/lose template match after the end match.");
                                 });
                             }
+
+                            ui.add_space(10.0);
+                            ui.separator();
+                            ui.add_space(5.0);
+
+                            ui.horizontal(|ui| {
+                                ui.checkbox(&mut self.config.detect_characters, "Detect Character Names (GGST only)");
+                                instant_tooltip(ui, "Detect 1P/2P character names via OCR 1s after start match\nand include them in exported video filenames.");
+                            });
 
                             if let Some(state) = open_roi_selection {
                                 self.roi_selection = Some(state);

@@ -1,6 +1,7 @@
 mod cli;
 mod ffmpeg;
 mod image_proc;
+mod ocr;
 mod types;
 mod utils;
 
@@ -15,10 +16,11 @@ use std::time::Instant;
 
 use cli::Args;
 use ffmpeg::{
-    check_and_install_ffmpeg, export_segments_ffmpeg, find_exact_boundary, find_match_result, get_video_duration,
+    check_and_install_ffmpeg, export_segments_ffmpeg, extract_frame_roi, find_exact_boundary, find_match_result, get_video_duration,
     get_video_info,
 };
 use image_proc::{compute_similarity_zero_copy, extract_roi, compute_template_stats};
+use ocr::{get_default_character_rois, GGSTDetector};
 use types::{BBox, SearchState, Segment};
 use utils::{format_duration, pause, resolve_template_path};
 
@@ -203,6 +205,25 @@ fn main() {
     let duration = get_video_duration(&input_path).unwrap_or(0.0);
     let total_frames = (duration * video_info.fps) as usize;
 
+    let (def_p1_roi, def_p2_roi) = get_default_character_rois(video_info.width, video_info.height);
+    let p1_roi = parse_roi(args.p1_roi.as_ref()).unwrap_or(def_p1_roi);
+    let p2_roi = parse_roi(args.p2_roi.as_ref()).unwrap_or(def_p2_roi);
+
+    let mut detector_opt = if args.detect_characters {
+        match GGSTDetector::try_new() {
+            Ok(d) => {
+                println!("[OCR]: GGST Character Detector loaded successfully.");
+                Some(d)
+            }
+            Err(e) => {
+                println!("[OCR Warning]: Failed to load GGST Character Detector: {}. Character detection will be disabled.", e);
+                None
+            }
+        }
+    } else {
+        None
+    };
+
     println!(
         "\nScanning video ({}x{}, {:.2} FPS, ~{} frames) with step={}...",
         video_info.width, video_info.height, video_info.fps, total_frames, args.step_frames
@@ -216,6 +237,8 @@ fn main() {
     let mut state = SearchState::SearchStart;
     let mut start_time: Option<f64> = None;
     let mut start_frame: Option<usize> = None;
+    let mut current_p1_name: Option<String> = None;
+    let mut current_p2_name: Option<String> = None;
 
     let pb = ProgressBar::new(total_frames as u64);
     pb.set_style(
@@ -308,6 +331,50 @@ fn main() {
                     start_frame = Some(adjusted_frame);
                     start_time = Some(adjusted_time);
                     state = SearchState::SearchEnd;
+
+                    // Character Name Detection 1.0s after exact start
+                    let mut p1_detected = None;
+                    let mut p2_detected = None;
+
+                    if let Some(ref mut detector) = detector_opt {
+                        let probe_time = exact_time + 1.0;
+                        if let Some(p1_img) = extract_frame_roi(&input_path, probe_time, p1_roi) {
+                            if let Ok(Some((name, conf))) = detector.detect_and_recognize(&p1_img) {
+                                p1_detected = Some((name.to_string(), conf));
+                            }
+                        }
+                        if let Some(p2_img) = extract_frame_roi(&input_path, probe_time, p2_roi) {
+                            if let Ok(Some((name, conf))) = detector.detect_and_recognize(&p2_img) {
+                                p2_detected = Some((name.to_string(), conf));
+                            }
+                        }
+
+                        // Retry 60 frames later if either character was not detected
+                        if p1_detected.is_none() || p2_detected.is_none() {
+                            let retry_time = probe_time + (60.0 / video_info.fps);
+                            if p1_detected.is_none() {
+                                if let Some(p1_img) = extract_frame_roi(&input_path, retry_time, p1_roi) {
+                                    if let Ok(Some((name, conf))) = detector.detect_and_recognize(&p1_img) {
+                                        p1_detected = Some((name.to_string(), conf));
+                                    }
+                                }
+                            }
+                            if p2_detected.is_none() {
+                                if let Some(p2_img) = extract_frame_roi(&input_path, retry_time, p2_roi) {
+                                    if let Ok(Some((name, conf))) = detector.detect_and_recognize(&p2_img) {
+                                        p2_detected = Some((name.to_string(), conf));
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    current_p1_name = p1_detected.map(|(n, _)| n);
+                    current_p2_name = p2_detected.map(|(n, _)| n);
+
+                    let p1_display = current_p1_name.clone();
+                    let p2_display = current_p2_name.clone();
+
                     pb.suspend(|| {
                         if args.start_offset != 0 {
                             println!(
@@ -323,6 +390,13 @@ fn main() {
                             println!(
                                 "\n[+] Start detected at frame {} ({:.3}s, sim={:.4})",
                                 raw_frame, exact_time, sim
+                            );
+                        }
+                        if p1_display.is_some() || p2_display.is_some() {
+                            println!(
+                                "    [Characters Detected]: 1P: {} vs 2P: {}",
+                                p1_display.as_deref().unwrap_or("Unknown"),
+                                p2_display.as_deref().unwrap_or("Unknown")
                             );
                         }
                     });
@@ -389,6 +463,8 @@ fn main() {
                         start: start_time.unwrap(),
                         end: adjusted_time,
                         result: match_result,
+                        p1_name: current_p1_name.take(),
+                        p2_name: current_p2_name.take(),
                     });
                     state = SearchState::SearchStart;
                     start_time = None;

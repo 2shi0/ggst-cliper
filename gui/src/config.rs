@@ -8,6 +8,7 @@ pub struct AppConfig {
     pub win_template: String,
     pub lose_template: String,
     pub detect_win_loss: bool,
+    pub detect_characters: bool,
     pub threshold: f32,
     pub step_frames: u32,
     pub start_offset: i32,
@@ -28,6 +29,7 @@ impl Default for AppConfig {
             win_template: "win.png".to_string(),
             lose_template: "lose.png".to_string(),
             detect_win_loss: true,
+            detect_characters: true,
             threshold: 0.9,
             step_frames: 60,
             start_offset: 0,
@@ -71,6 +73,9 @@ impl AppConfig {
                 if let Some(val) = section.get("lose_template") { config.lose_template = val.to_string(); }
                 if let Some(val) = section.get("detect_win_loss") {
                     if let Ok(v) = val.parse::<bool>() { config.detect_win_loss = v; }
+                }
+                if let Some(val) = section.get("detect_characters") {
+                    if let Ok(v) = val.parse::<bool>() { config.detect_characters = v; }
                 }
                 
                 if let Some(val) = section.get("threshold") { 
@@ -120,6 +125,7 @@ impl AppConfig {
             .set("win_template", &self.win_template)
             .set("lose_template", &self.lose_template)
             .set("detect_win_loss", self.detect_win_loss.to_string())
+            .set("detect_characters", self.detect_characters.to_string())
             .set("threshold", self.threshold.to_string())
             .set("step_frames", self.step_frames.to_string())
             .set("start_offset", self.start_offset.to_string())

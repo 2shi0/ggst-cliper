@@ -241,6 +241,40 @@ pub fn find_match_result(
     result
 }
 
+pub fn extract_frame_roi(input_path: &str, time_sec: f64, bbox: BBox) -> Option<image::RgbImage> {
+    let crop_filter = format!("format=rgb24,crop={}:{}:{}:{}", bbox.width, bbox.height, bbox.x, bbox.y);
+    let mut child = Command::new("ffmpeg")
+        .args(&[
+            "-ss",
+            &format!("{:.6}", time_sec),
+            "-i",
+            input_path,
+            "-frames:v",
+            "1",
+            "-vf",
+            &crop_filter,
+            "-f",
+            "image2pipe",
+            "-pix_fmt",
+            "rgb24",
+            "-vcodec",
+            "rawvideo",
+            "-",
+        ])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+
+    let mut stdout = child.stdout.take()?;
+    let frame_size = (bbox.width * bbox.height * 3) as usize;
+    let mut buffer = vec![0u8; frame_size];
+    stdout.read_exact(&mut buffer).ok()?;
+    let _ = child.wait();
+
+    image::RgbImage::from_raw(bbox.width, bbox.height, buffer)
+}
+
 pub fn export_segments_ffmpeg(input: &str, segments: &[Segment], out_dir: &Path) {
     if segments.is_empty() {
         println!("No segments found to export.");
@@ -262,7 +296,13 @@ pub fn export_segments_ffmpeg(input: &str, segments: &[Segment], out_dir: &Path)
             MatchResult::Unknown => "unknown-",
             MatchResult::Skipped => "",
         };
-        let out_name = format!("{}{}-part{:03}.mp4", prefix, file_stem, i + 1);
+        let char_suffix = match (&seg.p1_name, &seg.p2_name) {
+            (Some(p1), Some(p2)) => format!("-{}-vs-{}", p1, p2),
+            (Some(p1), None) => format!("-{}-vs-Unknown", p1),
+            (None, Some(p2)) => format!("-Unknown-vs-{}", p2),
+            (None, None) => "".to_string(),
+        };
+        let out_name = format!("{}{}{}-part{:03}.mp4", prefix, file_stem, char_suffix, i + 1);
         let out_path = out_dir.join(out_name);
         let mut cmd = Command::new("ffmpeg");
         let start_str = format!("{:.3}", seg.start);

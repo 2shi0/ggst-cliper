@@ -55,4 +55,13 @@ pub struct Args {
 
     #[arg(long)]
     pub lose_roi: Option<String>,
+
+    #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
+    pub detect_characters: bool,
+
+    #[arg(long)]
+    pub p1_roi: Option<String>,
+
+    #[arg(long)]
+    pub p2_roi: Option<String>,
 }

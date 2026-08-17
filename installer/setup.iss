@@ -1,5 +1,5 @@
 #define MyAppName "ggst-clipper"
-#define MyAppVersion "0.1.4"
+#define MyAppVersion "0.1.5"
 #define MyAppPublisher "Naoya"
 #define GuiExeName "ggst-clipper.exe"
 #define CuiExeName "ggst-clipper-cui.exe"
@@ -33,6 +33,8 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 ; ビルドされたGUIとCUIの実行ファイルを指定 (相対パス)
 Source: "..\target\release\{#GuiExeName}"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\target\release\{#CuiExeName}"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\target\release\onnxruntime.dll"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
+Source: "..\assets\models\*"; DestDir: "{app}\models"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "..\assets\icon.ico"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
