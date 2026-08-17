@@ -13,9 +13,9 @@
   <p align="center">
     <a href="https://github.com/2shi0/ggst-cliper/releases"><img src="https://img.shields.io/github/v/release/2shi0/ggst-cliper?logo=github" alt="Release" /></a>
     <a href="https://github.com/2shi0/ggst-cliper/actions/workflows/release.yml"><img src="https://img.shields.io/github/actions/workflow/status/2shi0/ggst-cliper/release.yml?logo=githubactions&logoColor=white&label=Build" alt="Build Status" /></a>
+    <a href="http://www.wtfpl.net/"><img src="https://img.shields.io/badge/License-WTFPL-brightgreen.svg" alt="License: WTFPL" /></a>
     <a href="https://github.com/2shi0/ggst-cliper/releases"><img src="https://img.shields.io/github/downloads/2shi0/ggst-cliper/total?logo=github" alt="Downloads" /></a>
     <a href="https://github.com/2shi0/ggst-cliper/stargazers"><img src="https://img.shields.io/github/stars/2shi0/ggst-cliper?logo=github" alt="Stars" /></a>
-    <a href="http://www.wtfpl.net/"><img src="https://img.shields.io/badge/License-WTFPL-brightgreen.svg" alt="License: WTFPL" /></a>
   </p>
 
 </div>
