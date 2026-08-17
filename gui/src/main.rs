@@ -257,8 +257,26 @@ impl GgstClipApp {
 
     fn render_header(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
-            ui.heading("GGST Clipper");
-            ui.label(theme::subtle("v0.2.0"));
+            let mut title_job = egui::text::LayoutJob::default();
+            title_job.append(
+                "GGST Clipper",
+                0.0,
+                egui::TextFormat {
+                    font_id: egui::TextStyle::Heading.resolve(ui.style()),
+                    color: theme::TEXT_WHITE,
+                    ..Default::default()
+                },
+            );
+            title_job.append(
+                concat!("v", env!("CARGO_PKG_VERSION")),
+                ui.spacing().item_spacing.x,
+                egui::TextFormat {
+                    font_id: egui::TextStyle::Body.resolve(ui.style()),
+                    color: theme::TEXT_SUBTLE,
+                    ..Default::default()
+                },
+            );
+            ui.label(title_job);
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let settings_btn = if self.show_settings {
@@ -1029,8 +1047,8 @@ impl eframe::App for GgstClipApp {
                 match &mut self.task_status {
                     TaskStatus::Idle => {
                         let available_size = ui.available_size();
-                        let (rect, resp) =
-                            ui.allocate_exact_size(available_size, egui::Sense::click());
+                        let (rect, _resp) =
+                            ui.allocate_exact_size(available_size, egui::Sense::hover());
 
                         let stroke = if is_dragging {
                             egui::Stroke::new(1.5_f32, egui::Color32::from_rgb(100, 150, 240))
@@ -1048,11 +1066,14 @@ impl eframe::App for GgstClipApp {
                         );
 
                         let mut request_pick = false;
+                        let content_height = 82.0_f32;
+                        let top_space = ((rect.height() - content_height) / 2.0_f32).max(0.0_f32);
+
                         ui.allocate_new_ui(
-                            egui::UiBuilder::new().max_rect(rect.shrink(16.0_f32)),
+                            egui::UiBuilder::new().max_rect(rect),
                             |ui| {
                                 ui.vertical_centered(|ui| {
-                                    ui.add_space(24.0_f32);
+                                    ui.add_space(top_space);
                                     ui.heading("Drop match video file here");
                                     ui.add_space(4.0_f32);
                                     ui.label(
@@ -1061,7 +1082,7 @@ impl eframe::App for GgstClipApp {
                                         ),
                                     );
 
-                                    ui.add_space(18.0_f32);
+                                    ui.add_space(12.0_f32);
 
                                     if ui.button("Select Video...").clicked() {
                                         request_pick = true;
@@ -1070,7 +1091,7 @@ impl eframe::App for GgstClipApp {
                             },
                         );
 
-                        if resp.clicked() || request_pick {
+                        if request_pick {
                             if let Some(path) = FileDialog::new()
                                 .add_filter(
                                     "Video Files",
@@ -1234,7 +1255,7 @@ fn load_icon() -> egui::IconData {
 fn main() -> eframe::Result<()> {
     let native_options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([460.0_f32, 290.0_f32])
+            .with_inner_size([460.0_f32, 200.0_f32])
             .with_title("ggst-clipper")
             .with_resizable(false)
             .with_icon(load_icon()),
