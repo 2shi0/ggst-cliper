@@ -15,7 +15,7 @@ pub fn check_and_install_ffmpeg() {
         if input.trim().eq_ignore_ascii_case("y") {
             println!("Installing FFmpeg...");
             let status = Command::new("winget")
-                .args(&["install", "ffmpeg"])
+                .args(["install", "ffmpeg"])
                 .status();
             match status {
                 Ok(s) if s.success() => {
@@ -39,7 +39,7 @@ pub fn check_and_install_ffmpeg() {
 
 pub fn get_video_info(path: &str) -> Option<VideoInfo> {
     let output = Command::new("ffprobe")
-        .args(&[
+        .args([
             "-v",
             "error",
             "-select_streams",
@@ -75,7 +75,7 @@ pub fn get_video_info(path: &str) -> Option<VideoInfo> {
 
 pub fn get_video_duration(path: &str) -> Option<f64> {
     let output = Command::new("ffprobe")
-        .args(&[
+        .args([
             "-v",
             "error",
             "-show_entries",
@@ -90,6 +90,7 @@ pub fn get_video_duration(path: &str) -> Option<f64> {
     s.trim().parse().ok()
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn find_exact_boundary(
     input_path: &str,
     start_time: f64,
@@ -102,7 +103,7 @@ pub fn find_exact_boundary(
 ) -> f64 {
     let crop_filter = format!("format=rgb24,crop={}:{}:{}:{}", bbox.width, bbox.height, bbox.x, bbox.y);
     let mut child = Command::new("ffmpeg")
-        .args(&[
+        .args([
             "-ss",
             &format!("{:.6}", start_time),
             "-i",
@@ -147,104 +148,11 @@ pub fn find_exact_boundary(
     best_match_time
 }
 
-pub fn find_match_result(
-    input_path: &str,
-    start_time: f64,
-    win_bbox: Option<BBox>,
-    win_tmpl: Option<&[u8]>,
-    win_stats: Option<&TemplateStats>,
-    lose_bbox: Option<BBox>,
-    lose_tmpl: Option<&[u8]>,
-    lose_stats: Option<&TemplateStats>,
-    threshold: f64,
-    win_offset: usize,
-) -> MatchResult {
-    if win_offset == 0 || (win_bbox.is_none() && lose_bbox.is_none()) {
-        return MatchResult::Skipped;
-    }
-
-    let num_frames = win_offset;
-
-    let w_box = win_bbox.unwrap_or(BBox::new(0,0,0,0));
-    let l_box = lose_bbox.unwrap_or(BBox::new(0,0,0,0));
-
-    let union_bbox = if win_bbox.is_some() && lose_bbox.is_some() {
-        w_box.union(&l_box)
-    } else if win_bbox.is_some() {
-        w_box
-    } else {
-        l_box
-    };
-
-    let rel_win_bbox = if win_bbox.is_some() {
-        BBox::new(w_box.x - union_bbox.x, w_box.y - union_bbox.y, w_box.width, w_box.height)
-    } else {
-        BBox::new(0,0,0,0)
-    };
-
-    let rel_lose_bbox = if lose_bbox.is_some() {
-        BBox::new(l_box.x - union_bbox.x, l_box.y - union_bbox.y, l_box.width, l_box.height)
-    } else {
-        BBox::new(0,0,0,0)
-    };
-
-    let crop_filter = format!("format=rgb24,crop={}:{}:{}:{}", union_bbox.width, union_bbox.height, union_bbox.x, union_bbox.y);
-    let mut child = Command::new("ffmpeg")
-        .args(&[
-            "-ss",
-            &format!("{:.6}", start_time),
-            "-i",
-            input_path,
-            "-frames:v",
-            &num_frames.to_string(),
-            "-vf",
-            &crop_filter,
-            "-f",
-            "image2pipe",
-            "-pix_fmt",
-            "rgb24",
-            "-vcodec",
-            "rawvideo",
-            "-",
-        ])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .expect("Failed to spawn ffmpeg for match result search");
-
-    let mut stdout = child.stdout.take().unwrap();
-    let frame_size = (union_bbox.width * union_bbox.height * 3) as usize;
-    let mut buffer = vec![0u8; frame_size];
-
-    let mut result = MatchResult::Unknown;
-
-    while stdout.read_exact(&mut buffer).is_ok() {
-        if let (Some(w_tmpl), Some(w_stats)) = (win_tmpl, win_stats) {
-            let sim = compute_similarity_zero_copy(&buffer, union_bbox.width, union_bbox.height, rel_win_bbox, w_tmpl, w_stats);
-            if sim >= threshold {
-                result = MatchResult::Win;
-                break;
-            }
-        }
-        if let (Some(l_tmpl), Some(l_stats)) = (lose_tmpl, lose_stats) {
-            let sim = compute_similarity_zero_copy(&buffer, union_bbox.width, union_bbox.height, rel_lose_bbox, l_tmpl, l_stats);
-            if sim >= threshold {
-                result = MatchResult::Lose;
-                break;
-            }
-        }
-    }
-
-    let _ = child.kill();
-    let _ = child.wait();
-
-    result
-}
 
 pub fn extract_frame_roi(input_path: &str, time_sec: f64, bbox: BBox) -> Option<image::RgbImage> {
     let crop_filter = format!("format=rgb24,crop={}:{}:{}:{}", bbox.width, bbox.height, bbox.x, bbox.y);
     let mut child = Command::new("ffmpeg")
-        .args(&[
+        .args([
             "-ss",
             &format!("{:.6}", time_sec),
             "-i",
@@ -328,6 +236,7 @@ pub fn export_segments_ffmpeg(
     segments: &[Segment],
     out_dir: &Path,
     my_character: Option<&str>,
+    on_progress: Option<&dyn Fn(usize, usize, &Path)>,
 ) {
     if segments.is_empty() {
         println!("No segments found to export.");
@@ -380,11 +289,16 @@ pub fn export_segments_ffmpeg(
         };
         let out_name = format!("{}{}-part{:03}.mp4", prefix, file_stem, i + 1);
         let out_path = target_dir.join(out_name);
+
+        if let Some(cb) = on_progress {
+            cb(i + 1, segments.len(), &out_path);
+        }
+
         let mut cmd = Command::new("ffmpeg");
         let start_str = format!("{:.3}", seg.start);
         let end_str = format!("{:.3}", seg.end);
 
-        cmd.args(&[
+        cmd.args([
             "-y",
             "-threads",
             "0",

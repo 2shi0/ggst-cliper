@@ -57,6 +57,9 @@ pub struct Args {
     pub lose_roi: Option<String>,
 
     #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
+    pub detect_win_loss: bool,
+
+    #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
     pub detect_characters: bool,
 
     #[arg(long)]
@@ -67,5 +70,13 @@ pub struct Args {
 
     #[arg(long)]
     pub my_character: Option<String>,
+
+    /// Output progress in JSON Lines format for GUI/IPC
+    #[arg(long)]
+    pub json: bool,
+
+    /// Do not pause (wait for Enter key) on exit
+    #[arg(long)]
+    pub no_pause: bool,
 }
 

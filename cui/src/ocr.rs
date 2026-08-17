@@ -5,7 +5,7 @@ use strsim::normalized_levenshtein;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::types::BBox;
+use crate::types::{BBox, MatchResult};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct CharacterRule {
@@ -58,13 +58,16 @@ pub fn parse_character_rules(content: &str) -> Vec<CharacterRule> {
     rules
 }
 
-// Helper: match OCR recognized text against GGST characters using rules
-pub fn match_character(raw_text: &str, character_rules: &[CharacterRule]) -> Option<(String, f64)> {
-    let clean = raw_text
-        .to_uppercase()
+fn clean_ocr_text(s: &str) -> String {
+    s.to_uppercase()
         .chars()
         .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '?' || *c == '#' || *c == '.')
-        .collect::<String>();
+        .collect()
+}
+
+// Helper: match OCR recognized text against GGST characters using rules
+pub fn match_character(raw_text: &str, character_rules: &[CharacterRule]) -> Option<(String, f64)> {
+    let clean = clean_ocr_text(raw_text);
 
     if clean.is_empty() {
         return None;
@@ -74,12 +77,7 @@ pub fn match_character(raw_text: &str, character_rules: &[CharacterRule]) -> Opt
     if clean.len() <= 2 {
         for rule in character_rules {
             for alias in &rule.aliases {
-                let clean_alias = alias
-                    .to_uppercase()
-                    .chars()
-                    .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '?' || *c == '#' || *c == '.')
-                    .collect::<String>();
-                if clean == clean_alias {
+                if clean == clean_ocr_text(alias) {
                     return Some((rule.canonical_name.clone(), 1.0));
                 }
             }
@@ -93,15 +91,12 @@ pub fn match_character(raw_text: &str, character_rules: &[CharacterRule]) -> Opt
 
     for rule in character_rules {
         for alias in &rule.aliases {
-            let clean_alias = alias
-                .to_uppercase()
-                .chars()
-                .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '?' || *c == '#' || *c == '.')
-                .collect::<String>();
+            let clean_alias = clean_ocr_text(alias);
 
             if clean_alias.is_empty() {
                 continue;
             }
+
 
             let score = normalized_levenshtein(&clean, &clean_alias);
             let contains_bonus = if clean.len() >= 3 && clean_alias.len() >= 3 {
@@ -144,6 +139,34 @@ pub fn match_character(raw_text: &str, character_rules: &[CharacterRule]) -> Opt
     }
 }
 
+// Match recognized text to Win or Lose
+pub fn match_win_lose(raw_text: &str) -> MatchResult {
+    let clean = clean_ocr_text(raw_text);
+    if clean.is_empty() {
+        return MatchResult::Unknown;
+    }
+
+    // Direct substring match
+    if clean.contains("WIN") || clean.contains("VICTORY") {
+        return MatchResult::Win;
+    }
+    if clean.contains("LOSE") || clean.contains("LOSS") || clean.contains("LOST") || clean.contains("DEFEAT") {
+        return MatchResult::Lose;
+    }
+
+    // Fuzzy matching with Levenshtein distance
+    let win_sim = normalized_levenshtein(&clean, "WIN");
+    let lose_sim = normalized_levenshtein(&clean, "LOSE");
+
+    if win_sim >= 0.65 && win_sim > lose_sim {
+        MatchResult::Win
+    } else if lose_sim >= 0.60 && lose_sim > win_sim {
+        MatchResult::Lose
+    } else {
+        MatchResult::Unknown
+    }
+}
+
 
 // Simple contrast enhancement for GGST health bar text
 pub fn enhance_contrast(img: &RgbImage) -> RgbImage {
@@ -182,8 +205,8 @@ pub fn enhance_contrast(img: &RgbImage) -> RgbImage {
 
 pub fn resolve_model_path(file_name: &str) -> Option<PathBuf> {
     // 1. Next to current executable / models/ or directly next to exe
-    if let Ok(exe_path) = std::env::current_exe() {
-        if let Some(exe_dir) = exe_path.parent() {
+    if let Ok(exe_path) = std::env::current_exe()
+        && let Some(exe_dir) = exe_path.parent() {
             let candidate1 = exe_dir.join("models").join(file_name);
             if candidate1.exists() {
                 return Some(candidate1);
@@ -215,7 +238,6 @@ pub fn resolve_model_path(file_name: &str) -> Option<PathBuf> {
                 }
             }
         }
-    }
 
     // 2. assets/models/ or models/ in current working dir and its ancestors
     let asset_path = Path::new("assets").join("models").join(file_name);
@@ -264,11 +286,10 @@ pub fn resolve_model_path(file_name: &str) -> Option<PathBuf> {
     let manifest_path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .map(|p| p.join("assets").join("models").join(file_name));
-    if let Some(p) = manifest_path {
-        if p.exists() {
+    if let Some(p) = manifest_path
+        && p.exists() {
             return Some(p);
         }
-    }
 
     None
 }
@@ -312,25 +333,23 @@ impl GGSTDetector {
         // 1. AppData/Roaming/ggst-clipper/characters.txt
         if let Some(base_dirs) = directories::BaseDirs::new() {
             let app_data_char = base_dirs.config_dir().join("ggst-clipper").join("characters.txt");
-            if app_data_char.exists() {
-                if let Ok(content) = fs::read_to_string(&app_data_char) {
+            if app_data_char.exists()
+                && let Ok(content) = fs::read_to_string(&app_data_char) {
                     let rules = parse_character_rules(&content);
                     if !rules.is_empty() {
                         return rules;
                     }
                 }
-            }
         }
 
         // 2. resolve_model_path
-        if let Some(char_path) = resolve_model_path("characters.txt") {
-            if let Ok(content) = fs::read_to_string(&char_path) {
+        if let Some(char_path) = resolve_model_path("characters.txt")
+            && let Ok(content) = fs::read_to_string(&char_path) {
                 let rules = parse_character_rules(&content);
                 if !rules.is_empty() {
                     return rules;
                 }
             }
-        }
 
         // 3. Default embedded list
         Self::default_character_rules()
@@ -358,8 +377,9 @@ impl GGSTDetector {
         let mean = [0.485f32, 0.456f32, 0.406f32];
         let std = [0.229f32, 0.224f32, 0.225f32];
 
-        let mut det_data = vec![0f32; 1 * 3 * target_h * target_w];
+        let mut det_data = vec![0f32; 3 * target_h * target_w];
         for y in 0..target_h {
+
             for x in 0..target_w {
                 let p = resized_for_det.get_pixel(x as u32, y as u32);
                 for c in 0..3 {
@@ -470,28 +490,24 @@ impl GGSTDetector {
             let text_crop_raw = image::imageops::crop_imm(crop, *rx, *ry, *rw, *rh).to_image();
 
             for (t_crop, _tag) in [(&text_crop_enh, "enhanced"), (&text_crop_raw, "raw")] {
-                if let Ok((text, conf)) = self.recognize_single(t_crop) {
-                    if let Some((char_name, score)) = match_character(&text, &self.character_rules) {
-                        if score > highest_score {
+                if let Ok((text, conf)) = self.recognize_single(t_crop)
+                    && let Some((char_name, score)) = match_character(&text, &self.character_rules)
+                        && score > highest_score {
                             highest_score = score;
                             best_char_match = Some((char_name, conf));
                         }
-                    }
-                }
             }
         }
 
         // Fallback: If DBNet didn't find any box or low confidence, try whole crop
         if best_char_match.is_none() {
             for t_crop in [&enhanced, crop] {
-                if let Ok((text, conf)) = self.recognize_single(t_crop) {
-                    if let Some((char_name, score)) = match_character(&text, &self.character_rules) {
-                        if score >= 0.55 && score > highest_score {
+                if let Ok((text, conf)) = self.recognize_single(t_crop)
+                    && let Some((char_name, score)) = match_character(&text, &self.character_rules)
+                        && score >= 0.55 && score > highest_score {
                             highest_score = score;
                             best_char_match = Some((char_name, conf));
                         }
-                    }
-                }
             }
         }
 
@@ -510,8 +526,9 @@ impl GGSTDetector {
 
         let resized = image::imageops::resize(crop, target_w as u32, target_h as u32, image::imageops::FilterType::CatmullRom);
 
-        let mut data = vec![0f32; 1 * 3 * target_h * target_w];
+        let mut data = vec![0f32; 3 * target_h * target_w];
         for y in 0..target_h {
+
             for x in 0..target_w {
                 let p = resized.get_pixel(x as u32, y as u32);
                 for c in 0..3 {
@@ -545,13 +562,12 @@ impl GGSTDetector {
                 }
             }
 
-            if max_idx != 0 && max_idx != last_idx {
-                if max_idx < self.characters.len() {
+            if max_idx != 0 && max_idx != last_idx
+                && max_idx < self.characters.len() {
                     recognized_chars.push(self.characters[max_idx].clone());
                     total_prob += max_prob;
                     count += 1;
                 }
-            }
             last_idx = max_idx;
         }
 
@@ -560,6 +576,147 @@ impl GGSTDetector {
 
         Ok((text, avg_conf))
     }
+
+    pub fn detect_win_lose(&mut self, crop: &RgbImage) -> Result<MatchResult, Box<dyn std::error::Error>> {
+        let (orig_w, orig_h) = crop.dimensions();
+        if orig_w < 5 || orig_h < 5 {
+            return Ok(MatchResult::Unknown);
+        }
+
+        let enhanced = enhance_contrast(crop);
+
+        // 1. Direct whole-crop recognition (fast & effective for large WIN/LOSE letters)
+        for t_crop in [&enhanced, crop] {
+            if let Ok((text, _conf)) = self.recognize_single(t_crop) {
+                let res = match_win_lose(&text);
+                if res == MatchResult::Win || res == MatchResult::Lose {
+                    return Ok(res);
+                }
+            }
+        }
+
+        // 2. DBNet text box detection
+        let min_side = (orig_w.min(orig_h) as f32).max(1.0f32);
+        let scale = (736.0f32 / min_side).max(1.0f32);
+        let target_w = ((orig_w as f32 * scale / 32.0).round() as usize * 32).max(32);
+        let target_h = ((orig_h as f32 * scale / 32.0).round() as usize * 32).max(32);
+
+        let resized_for_det = image::imageops::resize(&enhanced, target_w as u32, target_h as u32, image::imageops::FilterType::CatmullRom);
+
+        let mean = [0.485f32, 0.456f32, 0.406f32];
+        let std = [0.229f32, 0.224f32, 0.225f32];
+
+        let mut det_data = vec![0f32; 3 * target_h * target_w];
+        for y in 0..target_h {
+            for x in 0..target_w {
+                let p = resized_for_det.get_pixel(x as u32, y as u32);
+                for c in 0..3 {
+                    let val = (p[c] as f32 / 255.0 - mean[c]) / std[c];
+                    let idx = c * (target_h * target_w) + y * target_w + x;
+                    det_data[idx] = val;
+                }
+            }
+        }
+
+        let (out_h, out_w, prob_vec) = {
+            let input_tensor = Tensor::from_array((vec![1, 3, target_h, target_w], det_data))?;
+            let outputs = self.det_session.run(ort::inputs!["x" => input_tensor])?;
+            let (shape, prob_slice) = outputs[0].try_extract_tensor::<f32>()?;
+            (shape[2] as usize, shape[3] as usize, prob_slice.to_vec())
+        };
+
+        let scale_x = orig_w as f32 / out_w as f32;
+        let scale_y = orig_h as f32 / out_h as f32;
+
+        let mut visited = vec![false; out_h * out_w];
+        let mut text_boxes = Vec::new();
+
+        for y in 0..out_h {
+            for x in 0..out_w {
+                let idx = y * out_w + x;
+                if visited[idx] || prob_vec[idx] < 0.25 {
+                    continue;
+                }
+
+                let mut min_x = x;
+                let mut max_x = x;
+                let mut min_y = y;
+                let mut max_y = y;
+                let mut queue = std::collections::VecDeque::new();
+
+                queue.push_back((x, y));
+                visited[idx] = true;
+
+                while let Some((cx, cy)) = queue.pop_front() {
+                    min_x = min_x.min(cx);
+                    max_x = max_x.max(cx);
+                    min_y = min_y.min(cy);
+                    max_y = max_y.max(cy);
+
+                    for (dx, dy) in [(-1isize, 0isize), (1, 0), (0, -1), (0, 1)] {
+                        let nx = cx as isize + dx;
+                        let ny = cy as isize + dy;
+
+                        if nx >= 0 && nx < out_w as isize && ny >= 0 && ny < out_h as isize {
+                            let n_idx = ny as usize * out_w + nx as usize;
+                            if !visited[n_idx] && prob_vec[n_idx] >= 0.25 {
+                                visited[n_idx] = true;
+                                queue.push_back((nx as usize, ny as usize));
+                            }
+                        }
+                    }
+                }
+
+                let bw = (max_x - min_x + 1) as f32 * scale_x;
+                let bh = (max_y - min_y + 1) as f32 * scale_y;
+                let bx = (min_x as f32 * scale_x).floor().max(0.0) as u32;
+                let by = (min_y as f32 * scale_y).floor().max(0.0) as u32;
+
+                let pad_x = (bw * 0.15).max(3.0) as u32;
+                let pad_y = (bh * 0.15).max(3.0) as u32;
+
+                let exp_x = bx.saturating_sub(pad_x);
+                let exp_y = by.saturating_sub(pad_y);
+                let exp_w = ((bw as u32 + pad_x * 2).min(orig_w - exp_x)).max(1);
+                let exp_h = ((bh as u32 + pad_y * 2).min(orig_h - exp_y)).max(1);
+
+                if exp_w >= 10 && exp_h >= 6 {
+                    text_boxes.push((exp_x, exp_y, exp_w, exp_h));
+                }
+            }
+        }
+
+        // Test each detected text bounding box
+        for (rx, ry, rw, rh) in &text_boxes {
+            let text_crop_enh = image::imageops::crop_imm(&enhanced, *rx, *ry, *rw, *rh).to_image();
+            let text_crop_raw = image::imageops::crop_imm(crop, *rx, *ry, *rw, *rh).to_image();
+
+            for t_crop in [&text_crop_enh, &text_crop_raw] {
+                if let Ok((text, _conf)) = self.recognize_single(t_crop) {
+                    let res = match_win_lose(&text);
+                    if res == MatchResult::Win || res == MatchResult::Lose {
+                        return Ok(res);
+                    }
+                }
+            }
+        }
+
+        Ok(MatchResult::Unknown)
+    }
+}
+
+pub fn get_default_win_lose_roi(video_width: u32, video_height: u32) -> BBox {
+    let vw = video_width as f32;
+    let vh = video_height as f32;
+
+    // WIN/LOSE text in GGST Result Screen:
+    // Left: ~8.0% x, 20.0% y, 22.0% w, 18.0% h
+    let x = (vw * 0.08).round() as u32;
+    let y = (vh * 0.20).round() as u32;
+    let w = (vw * 0.22).round() as u32;
+    let h = (vh * 0.18).round() as u32;
+
+    BBox::new(x, y, w, h)
 }
 
 pub fn get_default_character_rois(video_width: u32, video_height: u32) -> (BBox, BBox) {
@@ -665,5 +822,44 @@ mod tests {
         let custom_rules = parse_character_rules("NEW_FIGHTER: THE NEW FIGHTER, NEWFIGHTER");
         assert_eq!(match_character("THE NEW FIGHTER", &custom_rules).map(|(n, _)| n), Some("NEW_FIGHTER".to_string()));
         assert_eq!(match_character("NEWFIGHTER", &custom_rules).map(|(n, _)| n), Some("NEW_FIGHTER".to_string()));
+    }
+
+    #[test]
+    fn test_match_win_lose_logic() {
+        assert_eq!(match_win_lose("WIN"), MatchResult::Win);
+        assert_eq!(match_win_lose("W1N"), MatchResult::Win);
+        assert_eq!(match_win_lose("YOU WIN"), MatchResult::Win);
+        assert_eq!(match_win_lose("VICTORY"), MatchResult::Win);
+
+        assert_eq!(match_win_lose("LOSE"), MatchResult::Lose);
+        assert_eq!(match_win_lose("LOST"), MatchResult::Lose);
+        assert_eq!(match_win_lose("LOSS"), MatchResult::Lose);
+        assert_eq!(match_win_lose("YOU LOSE"), MatchResult::Lose);
+        assert_eq!(match_win_lose("DEFEAT"), MatchResult::Lose);
+
+        assert_eq!(match_win_lose(""), MatchResult::Unknown);
+        assert_eq!(match_win_lose("BATTLE CHART"), MatchResult::Unknown);
+    }
+
+    #[test]
+    fn test_default_win_lose_roi() {
+        let roi_1080p = get_default_win_lose_roi(1920, 1080);
+        assert_eq!(roi_1080p.x, 154);
+        assert_eq!(roi_1080p.y, 216);
+        assert_eq!(roi_1080p.width, 422);
+        assert_eq!(roi_1080p.height, 194);
+    }
+
+    #[test]
+    fn test_detect_real_lose_frame() {
+        let frame_path = r"C:\Users\naoya\.gemini\antigravity\brain\9377f127-511f-4911-81b4-a4dd5f88dc9f\frame_216.0.png";
+        if let Ok(img) = image::open(frame_path) {
+            let rgb = img.to_rgb8();
+            let roi = get_default_win_lose_roi(rgb.width(), rgb.height());
+            let crop = image::imageops::crop_imm(&rgb, roi.x, roi.y, roi.width, roi.height).to_image();
+            let mut detector = GGSTDetector::try_new().expect("Failed to create detector");
+            let result = detector.detect_win_lose(&crop).expect("detect_win_lose failed");
+            assert_eq!(result, MatchResult::Lose);
+        }
     }
 }

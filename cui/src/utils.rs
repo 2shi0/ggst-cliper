@@ -6,8 +6,8 @@ pub fn resolve_template_path(tmpl_path: &str) -> String {
     if p.is_absolute() && p.exists() {
         return tmpl_path.to_string();
     }
-    if let Ok(exe_path) = std::env::current_exe() {
-        if let Some(exe_dir) = exe_path.parent() {
+    if let Ok(exe_path) = std::env::current_exe()
+        && let Some(exe_dir) = exe_path.parent() {
             let candidate = exe_dir.join(tmpl_path);
             if candidate.exists() {
                 return candidate.to_str().unwrap().to_string();
@@ -26,7 +26,6 @@ pub fn resolve_template_path(tmpl_path: &str) -> String {
                 }
             }
         }
-    }
     if let Some(base_dirs) = directories::BaseDirs::new() {
         let app_data_tmpl = base_dirs.config_dir().join("ggst-clipper").join(tmpl_path);
         if app_data_tmpl.exists() {

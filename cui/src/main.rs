@@ -8,48 +8,84 @@ mod utils;
 use clap::Parser;
 use indicatif::{ProgressBar, ProgressStyle};
 use std::fs;
-use std::io::BufReader;
-use std::io::Read;
+use std::io::{BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::Instant;
 
 use cli::Args;
 use ffmpeg::{
-    check_and_install_ffmpeg, export_segments_ffmpeg, extract_frame_roi, find_exact_boundary, find_match_result, get_video_duration,
-    get_video_info,
+    check_and_install_ffmpeg, export_segments_ffmpeg, extract_frame_roi, find_exact_boundary,
+    get_video_duration, get_video_info,
 };
 use image_proc::{compute_similarity_zero_copy, scale_and_crop_template};
-use ocr::{get_default_character_rois, GGSTDetector};
-use types::{BBox, SearchState, Segment};
+use ocr::{get_default_character_rois, get_default_win_lose_roi, GGSTDetector};
+use types::{BBox, IpcMessage, MatchResult, SearchState, Segment};
 use utils::{format_duration, pause, resolve_template_path};
+
+fn send_ipc(msg: &IpcMessage) {
+    if let Ok(json) = serde_json::to_string(msg) {
+        println!("{}", json);
+        let _ = std::io::stdout().flush();
+    }
+}
+
+fn exit_error(msg: &str, is_json: bool, no_pause: bool) -> ! {
+    if is_json {
+        send_ipc(&IpcMessage::Error {
+            message: msg.to_string(),
+        });
+    } else {
+        println!("Error: {}", msg);
+        if !no_pause {
+            pause();
+        }
+    }
+    std::process::exit(1);
+}
 
 fn main() {
     let args = match Args::try_parse() {
         Ok(a) => a,
         Err(e) => {
-            println!("{}", e);
-            pause();
+            let _ = e.print();
+            if e.use_stderr() {
+                let has_no_pause = std::env::args().any(|arg| arg == "--no-pause" || arg == "--json");
+                if !has_no_pause {
+                    pause();
+                }
+            }
             return;
         }
     };
 
-    check_and_install_ffmpeg();
+    if !args.json {
+        check_and_install_ffmpeg();
+    }
+
     let input_path_opt = args.input_positional.or(args.input);
 
     let input_path = match input_path_opt {
         Some(p) => p,
         None => {
+            if args.json {
+                exit_error("No video file was specified.", true, args.no_pause);
+            }
             println!("Please select a video file (file dialog will open)...");
             if let Some(path) = rfd::FileDialog::new()
-                .add_filter("Video files", &["mp4", "avi", "mkv", "mov", "flv", "wmv", "webm"])
+                .add_filter(
+                    "Video files",
+                    &["mp4", "avi", "mkv", "mov", "flv", "wmv", "webm"],
+                )
                 .set_title("Select a video file")
                 .pick_file()
             {
                 path.to_str().unwrap().to_string()
             } else {
                 println!("No video file was selected.");
-                pause();
+                if !args.no_pause {
+                    pause();
+                }
                 return;
             }
         }
@@ -60,9 +96,11 @@ fn main() {
         .unwrap_or(input_path);
 
     if !Path::new(&input_path).exists() {
-        println!("Error: Video file does not exist: {}", input_path);
-        pause();
-        return;
+        exit_error(
+            &format!("Video file does not exist: {}", input_path),
+            args.json,
+            args.no_pause,
+        );
     }
 
     let video_dir = Path::new(&input_path).parent().unwrap_or(Path::new(""));
@@ -74,18 +112,20 @@ fn main() {
 
     let start_tmpl_path = resolve_template_path(&args.start_template);
     let end_tmpl_path = resolve_template_path(&args.end_template);
-    let win_tmpl_path = resolve_template_path(&args.win_template);
-    let lose_tmpl_path = resolve_template_path(&args.lose_template);
 
-    println!("[Input Video]: {}", input_path);
-    println!("[Output Directory]: {}", output_dir.display());
+    if !args.json {
+        println!("[Input Video]: {}", input_path);
+        println!("[Output Directory]: {}", output_dir.display());
+    }
 
     let video_info = match get_video_info(&input_path) {
         Some(info) => info,
         None => {
-            println!("Error: Failed to get video info. Is FFmpeg installed and working?");
-            pause();
-            return;
+            exit_error(
+                "Failed to get video info. Is FFmpeg installed and working?",
+                args.json,
+                args.no_pause,
+            );
         }
     };
     let duration = get_video_duration(&input_path).unwrap_or(0.0);
@@ -94,109 +134,96 @@ fn main() {
     let parse_roi = |s: Option<&String>| -> Option<BBox> {
         if let Some(s) = s {
             let parts: Vec<&str> = s.split(',').collect();
-            if parts.len() == 4 {
-                if let (Ok(x), Ok(y), Ok(w), Ok(h)) = (
+            if parts.len() == 4
+                && let (Ok(x), Ok(y), Ok(w), Ok(h)) = (
                     parts[0].parse::<u32>(),
                     parts[1].parse::<u32>(),
                     parts[2].parse::<u32>(),
                     parts[3].parse::<u32>(),
-                ) {
-                    if w > 0 && h > 0 {
-                        return Some(BBox::new(x, y, w, h));
-                    }
-                }
+                )
+                && w > 0
+                && h > 0
+            {
+                return Some(BBox::new(x, y, w, h));
             }
         }
         None
     };
 
     // 1. Template Loading and Auto-Scaling
-    println!("\nLoading start template: {}", start_tmpl_path);
+    if !args.json {
+        println!("\nLoading start template: {}", start_tmpl_path);
+    }
     let start_img = match image::open(&start_tmpl_path) {
         Ok(img) => img,
         Err(e) => {
-            println!("Error: Failed to open start template '{}': {}", start_tmpl_path, e);
-            pause();
-            return;
+            exit_error(
+                &format!(
+                    "Failed to open start template '{}': {}",
+                    start_tmpl_path, e
+                ),
+                args.json,
+                args.no_pause,
+            );
         }
     };
-    let raw_start_bbox = parse_roi(args.start_roi.as_ref()).unwrap_or_else(|| BBox::new(0, 0, start_img.width(), start_img.height()));
-    let (start_bbox, start_tmpl, start_stats) = scale_and_crop_template(&start_img, raw_start_bbox, video_info.width, video_info.height);
-    if start_img.width() != video_info.width || start_img.height() != video_info.height {
-        println!(
-            "[Scale]: Start template auto-scaled from {}x{} to video {}x{} (ROI: {:?} -> {:?})",
-            start_img.width(), start_img.height(), video_info.width, video_info.height, raw_start_bbox, start_bbox
-        );
-    } else {
-        println!("Start ROI (x,y,w,h): {:?}", start_bbox);
+    let raw_start_bbox = parse_roi(args.start_roi.as_ref())
+        .unwrap_or_else(|| BBox::new(0, 0, start_img.width(), start_img.height()));
+    let (start_bbox, start_tmpl, start_stats) = scale_and_crop_template(
+        &start_img,
+        raw_start_bbox,
+        video_info.width,
+        video_info.height,
+    );
+    if !args.json {
+        if start_img.width() != video_info.width || start_img.height() != video_info.height {
+            println!(
+                "[Scale]: Start template auto-scaled from {}x{} to video {}x{} (ROI: {:?} -> {:?})",
+                start_img.width(),
+                start_img.height(),
+                video_info.width,
+                video_info.height,
+                raw_start_bbox,
+                start_bbox
+            );
+        } else {
+            println!("Start ROI (x,y,w,h): {:?}", start_bbox);
+        }
+        println!("Loading end template: {}", end_tmpl_path);
     }
 
-    println!("Loading end template: {}", end_tmpl_path);
     let end_img = match image::open(&end_tmpl_path) {
         Ok(img) => img,
         Err(e) => {
-            println!("Error: Failed to open end template '{}': {}", end_tmpl_path, e);
-            pause();
-            return;
+            exit_error(
+                &format!("Failed to open end template '{}': {}", end_tmpl_path, e),
+                args.json,
+                args.no_pause,
+            );
         }
     };
-    let raw_end_bbox = parse_roi(args.end_roi.as_ref()).unwrap_or_else(|| BBox::new(0, 0, end_img.width(), end_img.height()));
-    let (end_bbox, end_tmpl, end_stats) = scale_and_crop_template(&end_img, raw_end_bbox, video_info.width, video_info.height);
-    if end_img.width() != video_info.width || end_img.height() != video_info.height {
-        println!(
-            "[Scale]: End template auto-scaled from {}x{} to video {}x{} (ROI: {:?} -> {:?})",
-            end_img.width(), end_img.height(), video_info.width, video_info.height, raw_end_bbox, end_bbox
-        );
-    } else {
-        println!("End ROI (x,y,w,h): {:?}", end_bbox);
-    }
-
-    let (mut win_bbox_opt, mut win_tmpl_opt, mut win_stats_opt) = (None, None, None);
-    if Path::new(&win_tmpl_path).exists() {
-        if let Ok(img) = image::open(&win_tmpl_path) {
-            if let Some(raw_bbox) = parse_roi(args.win_roi.as_ref()) {
-                let (bbox, tmpl, stats) = scale_and_crop_template(&img, raw_bbox, video_info.width, video_info.height);
-                if img.width() != video_info.width || img.height() != video_info.height {
-                    println!(
-                        "[Scale]: Win template auto-scaled from {}x{} to video {}x{} (ROI: {:?} -> {:?})",
-                        img.width(), img.height(), video_info.width, video_info.height, raw_bbox, bbox
-                    );
-                } else {
-                    println!("Win ROI (x,y,w,h): {:?}", bbox);
-                }
-                win_bbox_opt = Some(bbox);
-                win_tmpl_opt = Some(tmpl);
-                win_stats_opt = Some(stats);
-            } else {
-                println!("Win ROI not set or invalid (0,0,0,0). Win detection skipped.");
-            }
+    let raw_end_bbox = parse_roi(args.end_roi.as_ref())
+        .unwrap_or_else(|| BBox::new(0, 0, end_img.width(), end_img.height()));
+    let (end_bbox, end_tmpl, end_stats) = scale_and_crop_template(
+        &end_img,
+        raw_end_bbox,
+        video_info.width,
+        video_info.height,
+    );
+    if !args.json {
+        if end_img.width() != video_info.width || end_img.height() != video_info.height {
+            println!(
+                "[Scale]: End template auto-scaled from {}x{} to video {}x{} (ROI: {:?} -> {:?})",
+                end_img.width(),
+                end_img.height(),
+                video_info.width,
+                video_info.height,
+                raw_end_bbox,
+                end_bbox
+            );
+        } else {
+            println!("End ROI (x,y,w,h): {:?}", end_bbox);
         }
-    } else {
-        println!("Win template '{}' not found. Win detection skipped.", win_tmpl_path);
-    }
-
-    let (mut lose_bbox_opt, mut lose_tmpl_opt, mut lose_stats_opt) = (None, None, None);
-    if Path::new(&lose_tmpl_path).exists() {
-        if let Ok(img) = image::open(&lose_tmpl_path) {
-            if let Some(raw_bbox) = parse_roi(args.lose_roi.as_ref()) {
-                let (bbox, tmpl, stats) = scale_and_crop_template(&img, raw_bbox, video_info.width, video_info.height);
-                if img.width() != video_info.width || img.height() != video_info.height {
-                    println!(
-                        "[Scale]: Lose template auto-scaled from {}x{} to video {}x{} (ROI: {:?} -> {:?})",
-                        img.width(), img.height(), video_info.width, video_info.height, raw_bbox, bbox
-                    );
-                } else {
-                    println!("Lose ROI (x,y,w,h): {:?}", bbox);
-                }
-                lose_bbox_opt = Some(bbox);
-                lose_tmpl_opt = Some(tmpl);
-                lose_stats_opt = Some(stats);
-            } else {
-                println!("Lose ROI not set or invalid (0,0,0,0). Lose detection skipped.");
-            }
-        }
-    } else {
-        println!("Lose template '{}' not found. Lose detection skipped.", lose_tmpl_path);
     }
 
     let union_bbox = start_bbox.union(&end_bbox);
@@ -220,14 +247,30 @@ fn main() {
     let p1_roi = parse_roi(args.p1_roi.as_ref()).unwrap_or(def_p1_roi);
     let p2_roi = parse_roi(args.p2_roi.as_ref()).unwrap_or(def_p2_roi);
 
-    let mut detector_opt = if args.detect_characters {
+    let def_win_lose_roi = get_default_win_lose_roi(video_info.width, video_info.height);
+    let win_lose_roi = parse_roi(args.win_roi.as_ref())
+        .filter(|r| r.width >= 50 && r.height >= 20)
+        .unwrap_or(def_win_lose_roi);
+
+    if !args.json && args.detect_win_loss {
+        println!("Win/Lose Detection ROI (x,y,w,h): {:?}", win_lose_roi);
+    }
+
+    let mut detector_opt = if args.detect_characters || args.detect_win_loss {
         match GGSTDetector::try_new() {
             Ok(d) => {
-                println!("[OCR]: GGST Character Detector loaded successfully.");
+                if !args.json {
+                    println!("[OCR]: GGST Detector loaded successfully.");
+                }
                 Some(d)
             }
             Err(e) => {
-                println!("[OCR Warning]: Failed to load GGST Character Detector: {}. Character detection will be disabled.", e);
+                if !args.json {
+                    println!(
+                        "[OCR Warning]: Failed to load GGST Detector: {}. OCR detection will be disabled.",
+                        e
+                    );
+                }
                 None
             }
         }
@@ -235,14 +278,16 @@ fn main() {
         None
     };
 
-    println!(
-        "\nScanning video ({}x{}, {:.2} FPS, ~{} frames) with step={}...",
-        video_info.width, video_info.height, video_info.fps, total_frames, args.step_frames
-    );
-    println!(
-        "ROI streaming size: {}x{} (Cropped from original {}x{})",
-        union_bbox.width, union_bbox.height, video_info.width, video_info.height
-    );
+    if !args.json {
+        println!(
+            "\nScanning video ({}x{}, {:.2} FPS, ~{} frames) with step={}...",
+            video_info.width, video_info.height, video_info.fps, total_frames, args.step_frames
+        );
+        println!(
+            "ROI streaming size: {}x{} (Cropped from original {}x{})",
+            union_bbox.width, union_bbox.height, video_info.width, video_info.height
+        );
+    }
 
     let mut segments = Vec::new();
     let mut state = SearchState::SearchStart;
@@ -251,22 +296,27 @@ fn main() {
     let mut current_p1_name: Option<String> = None;
     let mut current_p2_name: Option<String> = None;
 
-    let pb = ProgressBar::new(total_frames as u64);
-    pb.set_style(
-        ProgressStyle::default_bar()
-            .template(
-                "{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({eta}) {msg}",
-            )
-            .unwrap()
-            .progress_chars("#>-"),
-    );
+    let pb = if !args.json {
+        let bar = ProgressBar::new(total_frames as u64);
+        bar.set_style(
+            ProgressStyle::default_bar()
+                .template(
+                    "{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({eta}) {msg}",
+                )
+                .unwrap()
+                .progress_chars("#>-"),
+        );
+        Some(bar)
+    } else {
+        None
+    };
 
     let crop_filter = format!(
         "format=rgb24,crop={}:{}:{}:{},select='not(mod(n\\,{}))'",
         union_bbox.width, union_bbox.height, union_bbox.x, union_bbox.y, args.step_frames
     );
     let child = Command::new("ffmpeg")
-        .args(&[
+        .args([
             "-hwaccel",
             "auto",
             "-threads",
@@ -292,18 +342,20 @@ fn main() {
     let mut child = match child {
         Ok(c) => c,
         Err(e) => {
-            println!("Error: Failed to spawn FFmpeg process: {}", e);
-            pause();
-            return;
+            exit_error(
+                &format!("Failed to spawn FFmpeg process: {}", e),
+                args.json,
+                args.no_pause,
+            );
         }
     };
 
     let mut stdout = BufReader::new(child.stdout.take().unwrap());
     let frame_size = (union_bbox.width * union_bbox.height * 3) as usize;
     let mut buffer = vec![0u8; frame_size];
-    let mut f_idx = 0;
-
+    let mut f_idx: usize = 0;
     let mut frames_processed = 0;
+
     while stdout.read_exact(&mut buffer).is_ok() {
         frames_processed += 1;
         match state {
@@ -318,11 +370,7 @@ fn main() {
                 );
 
                 if sim >= args.threshold {
-                    let left_f = if f_idx >= args.step_frames {
-                        f_idx - args.step_frames
-                    } else {
-                        0
-                    };
+                    let left_f = f_idx.saturating_sub(args.step_frames);
                     let exact_time = find_exact_boundary(
                         &input_path,
                         left_f as f64 / video_info.fps,
@@ -343,77 +391,46 @@ fn main() {
                     start_time = Some(adjusted_time);
                     state = SearchState::SearchEnd;
 
-                    // Character Name Detection ~2.0s after exact start (when character names are clear on HUD)
-                    let mut p1_detected = None;
-                    let mut p2_detected = None;
-
-                    if let Some(ref mut detector) = detector_opt {
-                        let probe_time = exact_time + 2.0;
-                        if let Some(p1_img) = extract_frame_roi(&input_path, probe_time, p1_roi) {
-                            if let Ok(Some((name, conf))) = detector.detect_and_recognize(&p1_img) {
-                                p1_detected = Some((name.to_string(), conf));
-                            }
-                        }
-                        if let Some(p2_img) = extract_frame_roi(&input_path, probe_time, p2_roi) {
-                            if let Ok(Some((name, conf))) = detector.detect_and_recognize(&p2_img) {
-                                p2_detected = Some((name.to_string(), conf));
-                            }
-                        }
-
-                        // Retry up to 6 times (every 0.5s) if either character was not detected
-                        for retry_count in 1..=6 {
-                            if p1_detected.is_some() && p2_detected.is_some() {
-                                break;
-                            }
-                            let retry_time = probe_time + (0.5 * retry_count as f64);
-                            if p1_detected.is_none() {
-                                if let Some(p1_img) = extract_frame_roi(&input_path, retry_time, p1_roi) {
-                                    if let Ok(Some((name, conf))) = detector.detect_and_recognize(&p1_img) {
-                                        p1_detected = Some((name.to_string(), conf));
-                                    }
-                                }
-                            }
-                            if p2_detected.is_none() {
-                                if let Some(p2_img) = extract_frame_roi(&input_path, retry_time, p2_roi) {
-                                    if let Ok(Some((name, conf))) = detector.detect_and_recognize(&p2_img) {
-                                        p2_detected = Some((name.to_string(), conf));
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    current_p1_name = p1_detected.map(|(n, _)| n);
-                    current_p2_name = p2_detected.map(|(n, _)| n);
+                    let (p1, p2) = detect_match_characters(
+                        detector_opt.as_mut(),
+                        &input_path,
+                        exact_time,
+                        p1_roi,
+                        p2_roi,
+                    );
+                    current_p1_name = p1;
+                    current_p2_name = p2;
 
                     let p1_display = current_p1_name.clone();
                     let p2_display = current_p2_name.clone();
 
-                    pb.suspend(|| {
-                        if args.start_offset != 0 {
-                            println!(
-                                "\n[+] Start detected at frame {} ({:.3}s, sim={:.4}) -> adjusted to frame {} ({:.3}s, offset={}f)",
-                                raw_frame,
-                                exact_time,
-                                sim,
-                                adjusted_frame,
-                                adjusted_time,
-                                args.start_offset
-                            );
-                        } else {
-                            println!(
-                                "\n[+] Start detected at frame {} ({:.3}s, sim={:.4})",
-                                raw_frame, exact_time, sim
-                            );
-                        }
-                        if p1_display.is_some() || p2_display.is_some() {
-                            println!(
-                                "    [Characters Detected]: 1P: {} vs 2P: {}",
-                                p1_display.as_deref().unwrap_or("Unknown"),
-                                p2_display.as_deref().unwrap_or("Unknown")
-                            );
-                        }
-                    });
+                    if let Some(ref pb) = pb {
+                        pb.suspend(|| {
+                            if args.start_offset != 0 {
+                                println!(
+                                    "\n[+] Start detected at frame {} ({:.3}s, sim={:.4}) -> adjusted to frame {} ({:.3}s, offset={}f)",
+                                    raw_frame,
+                                    exact_time,
+                                    sim,
+                                    adjusted_frame,
+                                    adjusted_time,
+                                    args.start_offset
+                                );
+                            } else {
+                                println!(
+                                    "\n[+] Start detected at frame {} ({:.3}s, sim={:.4})",
+                                    raw_frame, exact_time, sim
+                                );
+                            }
+                            if p1_display.is_some() || p2_display.is_some() {
+                                println!(
+                                    "    [Characters Detected]: 1P: {} vs 2P: {}",
+                                    p1_display.as_deref().unwrap_or("Unknown"),
+                                    p2_display.as_deref().unwrap_or("Unknown")
+                                );
+                            }
+                        });
+                    }
                 }
             }
             SearchState::SearchEnd => {
@@ -426,11 +443,7 @@ fn main() {
                     &end_stats,
                 );
                 if sim >= args.threshold {
-                    let left_f = if f_idx >= args.step_frames {
-                        f_idx - args.step_frames
-                    } else {
-                        0
-                    };
+                    let left_f = f_idx.saturating_sub(args.step_frames);
                     let exact_time = find_exact_boundary(
                         &input_path,
                         left_f as f64 / video_info.fps,
@@ -447,39 +460,59 @@ fn main() {
                         .max(start_time.unwrap());
                     let adjusted_frame = (adjusted_time * video_info.fps).round() as usize;
 
-                    let match_result = find_match_result(
-                        &input_path,
-                        exact_time,
-                        win_bbox_opt,
-                        win_tmpl_opt.as_deref(),
-                        win_stats_opt.as_ref(),
-                        lose_bbox_opt,
-                        lose_tmpl_opt.as_deref(),
-                        lose_stats_opt.as_ref(),
-                        args.threshold,
-                        args.win_offset,
-                    );
+                    let match_result = if args.detect_win_loss {
+                        detect_match_win_lose(
+                            detector_opt.as_mut(),
+                            &input_path,
+                            exact_time,
+                            win_lose_roi,
+                        )
+                    } else {
+                        MatchResult::Skipped
+                    };
 
-                    pb.suspend(|| {
-                        if args.end_offset != 0 {
-                            println!(
-                                "[+] End detected at frame {} ({:.3}s, sim={:.4}) -> adjusted to frame {} ({:.3}s, offset={}f) [Result: {:?}]",
-                                raw_frame, exact_time, sim, adjusted_frame, adjusted_time, args.end_offset, match_result
-                            );
-                        } else {
-                            println!(
-                                "[+] End detected at frame {} ({:.3}s, sim={:.4}) [Result: {:?}]",
-                                raw_frame, exact_time, sim, match_result
-                            );
-                        }
-                    });
-                    segments.push(Segment {
+                    if let Some(ref pb) = pb {
+                        pb.suspend(|| {
+                            if args.end_offset != 0 {
+                                println!(
+                                    "[+] End detected at frame {} ({:.3}s, sim={:.4}) -> adjusted to frame {} ({:.3}s, offset={}f) [Result: {:?}]",
+                                    raw_frame,
+                                    exact_time,
+                                    sim,
+                                    adjusted_frame,
+                                    adjusted_time,
+                                    args.end_offset,
+                                    match_result
+                                );
+                            } else {
+                                println!(
+                                    "[+] End detected at frame {} ({:.3}s, sim={:.4}) [Result: {:?}]",
+                                    raw_frame, exact_time, sim, match_result
+                                );
+                            }
+                        });
+                    }
+
+                    let segment = Segment {
                         start: start_time.unwrap(),
                         end: adjusted_time,
                         result: match_result,
                         p1_name: current_p1_name.take(),
                         p2_name: current_p2_name.take(),
-                    });
+                    };
+
+                    if args.json {
+                        send_ipc(&IpcMessage::SegmentDetected {
+                            index: segments.len() + 1,
+                            start: segment.start,
+                            end: segment.end,
+                            result: segment.result,
+                            p1: segment.p1_name.clone(),
+                            p2: segment.p2_name.clone(),
+                        });
+                    }
+
+                    segments.push(segment);
                     state = SearchState::SearchStart;
                     start_time = None;
                     start_frame = None;
@@ -488,22 +521,57 @@ fn main() {
         }
 
         f_idx += args.step_frames;
-        if f_idx <= total_frames {
-            pb.set_position(f_idx as u64);
-        }
-    }
-    pb.finish_with_message("Done");
-    let status = child.wait();
-    if frames_processed == 0 {
-        println!("\n[!] Error: No frames were read from FFmpeg. FFmpeg process may have exited prematurely.");
-    }
-    if let Ok(s) = status {
-        if !s.success() {
-            println!("\n[!] FFmpeg main process exited with status: {}", s);
+        if let Some(ref pb) = pb {
+            if f_idx <= total_frames {
+                pb.set_position(f_idx as u64);
+            }
+        } else if args.json {
+            let pct = if total_frames > 0 {
+                (f_idx as f32 / total_frames as f32).clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
+            send_ipc(&IpcMessage::Progress {
+                phase: "scan".to_string(),
+                current: f_idx.min(total_frames),
+                total: total_frames,
+                percentage: pct,
+                message: format!(
+                    "Scanning frames ({}/{})",
+                    f_idx.min(total_frames),
+                    total_frames
+                ),
+            });
         }
     }
 
-    if state == SearchState::SearchEnd {
+    if let Some(ref pb) = pb {
+        pb.finish_with_message("Done");
+    }
+
+    let status = child.wait();
+    if frames_processed == 0 {
+        if args.json {
+            exit_error(
+                "No frames were read from FFmpeg. Process may have exited prematurely.",
+                true,
+                args.no_pause,
+            );
+        } else {
+            println!("\n[!] Error: No frames were read from FFmpeg. FFmpeg process may have exited prematurely.");
+        }
+    }
+    if let Ok(s) = status {
+        if !s.success() && !args.json {
+            println!("\n[!] FFmpeg main process exited with status: {}", s);
+        }
+    } else if let Err(e) = status {
+        if !args.json {
+            println!("\n[!] FFmpeg main process error: {}", e);
+        }
+    }
+
+    if state == SearchState::SearchEnd && !args.json {
         println!(
             "\n[!] Warning: Start detected at frame {} ({:.2}s) without a corresponding End before video finish.",
             start_frame.unwrap(),
@@ -515,19 +583,126 @@ fn main() {
 
     // 4. Trimming with FFmpeg
     let export_start = Instant::now();
-    export_segments_ffmpeg(&input_path, &segments, &output_dir, args.my_character.as_deref());
+    export_segments_ffmpeg(
+        &input_path,
+        &segments,
+        &output_dir,
+        args.my_character.as_deref(),
+        if args.json {
+            Some(&|current, total, path| {
+                let pct = current as f32 / total as f32;
+                let file_name = path
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_string();
+                send_ipc(&IpcMessage::Progress {
+                    phase: "export".to_string(),
+                    current,
+                    total,
+                    percentage: pct,
+                    message: format!("Exporting clip {}/{} -> {}", current, total, file_name),
+                });
+            })
+        } else {
+            None
+        },
+    );
     let export_duration = export_start.elapsed();
 
     let calc_secs = calc_duration.as_secs();
     let export_secs = export_duration.as_secs();
     let total_secs = calc_secs + export_secs;
 
-    println!("\n=== Processing Time ===");
-    println!("Frame Calculation: {}", format_duration(calc_secs));
-    println!("Video Export:      {}", format_duration(export_secs));
-    println!("Total Time:        {}", format_duration(total_secs));
-    println!("=======================\n");
+    if args.json {
+        send_ipc(&IpcMessage::Done {
+            total_frames,
+            segments_count: segments.len(),
+            calc_time_secs: calc_secs,
+            export_time_secs: export_secs,
+            total_time_secs: total_secs,
+            output_dir: output_dir.to_string_lossy().to_string(),
+        });
+    } else {
+        println!("\n=== Processing Time ===");
+        println!("Frame Calculation: {}", format_duration(calc_secs));
+        println!("Video Export:      {}", format_duration(export_secs));
+        println!("Total Time:        {}", format_duration(total_secs));
+        println!("=======================\n");
 
-    println!("\nProcessing completed!");
-    pause();
+        println!("\nProcessing completed!");
+        if !args.no_pause {
+            pause();
+        }
+    }
+}
+
+fn detect_match_win_lose(
+    detector_opt: Option<&mut GGSTDetector>,
+    input_path: &str,
+    exact_time: f64,
+    win_lose_roi: BBox,
+) -> MatchResult {
+    let Some(detector) = detector_opt else {
+        return MatchResult::Skipped;
+    };
+
+    for offset in [0.5, 1.0, 1.5, 2.0, 2.5, 3.0] {
+        let probe_time = exact_time + offset;
+        if let Some(crop) = extract_frame_roi(input_path, probe_time, win_lose_roi) {
+            if let Ok(res) = detector.detect_win_lose(&crop) {
+                if res == MatchResult::Win || res == MatchResult::Lose {
+                    return res;
+                }
+            }
+        }
+    }
+
+    MatchResult::Unknown
+}
+
+fn detect_match_characters(
+    detector_opt: Option<&mut GGSTDetector>,
+    input_path: &str,
+    exact_time: f64,
+    p1_roi: BBox,
+    p2_roi: BBox,
+) -> (Option<String>, Option<String>) {
+    let Some(detector) = detector_opt else {
+        return (None, None);
+    };
+
+    let probe_time = exact_time + 2.0;
+    let mut p1_detected = None;
+    let mut p2_detected = None;
+
+    let check_frame = |t: f64,
+                       p1_det: &mut Option<String>,
+                       p2_det: &mut Option<String>,
+                       det: &mut GGSTDetector| {
+        if p1_det.is_none()
+            && let Some(p1_img) = extract_frame_roi(input_path, t, p1_roi)
+            && let Ok(Some((name, _conf))) = det.detect_and_recognize(&p1_img)
+        {
+            *p1_det = Some(name);
+        }
+        if p2_det.is_none()
+            && let Some(p2_img) = extract_frame_roi(input_path, t, p2_roi)
+            && let Ok(Some((name, _conf))) = det.detect_and_recognize(&p2_img)
+        {
+            *p2_det = Some(name);
+        }
+    };
+
+    check_frame(probe_time, &mut p1_detected, &mut p2_detected, detector);
+
+    for retry_count in 1..=6 {
+        if p1_detected.is_some() && p2_detected.is_some() {
+            break;
+        }
+        let retry_time = probe_time + (0.5 * retry_count as f64);
+        check_frame(retry_time, &mut p1_detected, &mut p2_detected, detector);
+    }
+
+    (p1_detected, p2_detected)
 }

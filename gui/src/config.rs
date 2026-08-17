@@ -24,6 +24,10 @@ pub struct AppConfig {
 
 impl Default for AppConfig {
     fn default() -> Self {
+        let output_dir = directories::UserDirs::new()
+            .and_then(|dirs| dirs.video_dir().map(|p| p.to_string_lossy().to_string()))
+            .unwrap_or_default();
+
         Self {
             start_template: "start.png".to_string(),
             end_template: "end.png".to_string(),
@@ -37,7 +41,7 @@ impl Default for AppConfig {
             start_offset: 0,
             end_offset: -120,
             win_offset: 180,
-            output_dir: "".to_string(),
+            output_dir,
             start_roi: [0, 0, 0, 0],
             end_roi: [0, 0, 0, 0],
             win_roi: [0, 0, 0, 0],
@@ -48,19 +52,19 @@ impl Default for AppConfig {
 
 impl AppConfig {
     pub fn config_dir() -> PathBuf {
-        if let Some(base_dirs) = directories::BaseDirs::new() {
+        let dir = if let Some(base_dirs) = directories::BaseDirs::new() {
             base_dirs.config_dir().join("ggst-clipper")
         } else {
             PathBuf::from("ggst-clipper")
-        }
-    }
-
-    pub fn config_path() -> PathBuf {
-        let dir = Self::config_dir();
+        };
         if !dir.exists() {
             let _ = std::fs::create_dir_all(&dir);
         }
-        dir.join("config.ini")
+        dir
+    }
+
+    pub fn config_path() -> PathBuf {
+        Self::config_dir().join("config.ini")
     }
 
     pub fn characters_path() -> PathBuf {
@@ -70,14 +74,11 @@ impl AppConfig {
     pub fn ensure_characters_file() {
         let path = Self::characters_path();
         if !path.exists() {
-            let dir = Self::config_dir();
-            if !dir.exists() {
-                let _ = std::fs::create_dir_all(&dir);
-            }
             let default_text = include_str!("../../assets/models/characters.txt");
             let _ = std::fs::write(&path, default_text);
         }
     }
+
 
     pub fn get_character_names() -> Vec<String> {
         Self::ensure_characters_file();
@@ -109,36 +110,41 @@ impl AppConfig {
     pub fn load() -> Self {
         Self::ensure_characters_file();
         let path = Self::config_path();
+        if !path.exists() {
+            let config = Self::default();
+            config.save();
+            return config;
+        }
         let mut config = Self::default();
 
-        if let Ok(conf) = Ini::load_from_file(&path) {
-            if let Some(section) = conf.section(Some("Settings")) {
+        if let Ok(conf) = Ini::load_from_file(&path)
+            && let Some(section) = conf.section(Some("Settings")) {
                 if let Some(val) = section.get("start_template") { config.start_template = val.to_string(); }
                 if let Some(val) = section.get("end_template") { config.end_template = val.to_string(); }
                 if let Some(val) = section.get("win_template") { config.win_template = val.to_string(); }
                 if let Some(val) = section.get("lose_template") { config.lose_template = val.to_string(); }
-                if let Some(val) = section.get("detect_win_loss") {
-                    if let Ok(v) = val.parse::<bool>() { config.detect_win_loss = v; }
+                if let Some(v) = section.get("detect_win_loss").and_then(|s| s.parse().ok()) {
+                    config.detect_win_loss = v;
                 }
-                if let Some(val) = section.get("detect_characters") {
-                    if let Ok(v) = val.parse::<bool>() { config.detect_characters = v; }
+                if let Some(v) = section.get("detect_characters").and_then(|s| s.parse().ok()) {
+                    config.detect_characters = v;
                 }
                 if let Some(val) = section.get("my_character") { config.my_character = val.to_string(); }
                 
-                if let Some(val) = section.get("threshold") { 
-                    if let Ok(v) = val.parse::<f32>() { config.threshold = v; } 
+                if let Some(v) = section.get("threshold").and_then(|s| s.parse().ok()) { 
+                    config.threshold = v; 
                 }
-                if let Some(val) = section.get("step_frames") { 
-                    if let Ok(v) = val.parse::<u32>() { config.step_frames = v; } 
+                if let Some(v) = section.get("step_frames").and_then(|s| s.parse().ok()) { 
+                    config.step_frames = v; 
                 }
-                if let Some(val) = section.get("start_offset") { 
-                    if let Ok(v) = val.parse::<i32>() { config.start_offset = v; } 
+                if let Some(v) = section.get("start_offset").and_then(|s| s.parse().ok()) { 
+                    config.start_offset = v; 
                 }
-                if let Some(val) = section.get("end_offset") { 
-                    if let Ok(v) = val.parse::<i32>() { config.end_offset = v; } 
+                if let Some(v) = section.get("end_offset").and_then(|s| s.parse().ok()) { 
+                    config.end_offset = v; 
                 }
-                if let Some(val) = section.get("win_offset") { 
-                    if let Ok(v) = val.parse::<u32>() { config.win_offset = v; } 
+                if let Some(v) = section.get("win_offset").and_then(|s| s.parse().ok()) { 
+                    config.win_offset = v; 
                 }
                 if let Some(val) = section.get("output_dir") { config.output_dir = val.to_string(); }
 
@@ -154,14 +160,14 @@ impl AppConfig {
                     None
                 };
 
-                if let Some(val) = section.get("start_roi") { if let Some(arr) = parse_roi(val) { config.start_roi = arr; } }
-                if let Some(val) = section.get("end_roi") { if let Some(arr) = parse_roi(val) { config.end_roi = arr; } }
-                if let Some(val) = section.get("win_roi") { if let Some(arr) = parse_roi(val) { config.win_roi = arr; } }
-                if let Some(val) = section.get("lose_roi") { if let Some(arr) = parse_roi(val) { config.lose_roi = arr; } }
+                if let Some(arr) = section.get("start_roi").and_then(parse_roi) { config.start_roi = arr; }
+                if let Some(arr) = section.get("end_roi").and_then(parse_roi) { config.end_roi = arr; }
+                if let Some(arr) = section.get("win_roi").and_then(parse_roi) { config.win_roi = arr; }
+                if let Some(arr) = section.get("lose_roi").and_then(parse_roi) { config.lose_roi = arr; }
             }
-        }
         config
     }
+
 
     pub fn save(&self) {
         let path = Self::config_path();
@@ -186,6 +192,20 @@ impl AppConfig {
             .set("lose_roi", format!("{},{},{},{}", self.lose_roi[0], self.lose_roi[1], self.lose_roi[2], self.lose_roi[3]));
         
         let _ = conf.write_to_file(&path);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_default_config_output_dir() {
+        let config = AppConfig::default();
+        if let Some(user_dirs) = directories::UserDirs::new()
+            && let Some(video_dir) = user_dirs.video_dir() {
+            assert_eq!(config.output_dir, video_dir.to_string_lossy());
+        }
     }
 }
 

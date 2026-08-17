@@ -79,7 +79,9 @@ cargo build --release
 │ Settings                                                 │
 ├──────────────────────────────────────────────────────────┤
 │  [Start Template]     [End Template]                     │
-│  [Win Template]       [Lose Template] (Detect Win/Loss)  │
+│                                                          │
+│  [x] Detect Win/Lose (GGST only)                         │
+│  [x] Detect Character Names (GGST only)                  │
 │                                                          │
 │  Output Directory : [ Browse... ]                        │
 │  Threshold        : 0.90                                 │
@@ -93,9 +95,8 @@ cargo build --release
 
 - **Start Template**: 試合開始時の画像（例: `DUEL 1`, `ROUND 1`）
 - **End Template**: 試合終了時の画像（例: `SLASH`, `K.O.`）
-- **Detect Win/Loss**（トグル）: 勝敗判定機能を有効にする場合にチェック
-  - **Win Template**: 自プレイヤー勝利時の画像
-  - **Lose Template**: 自プレイヤー敗北時の画像
+- **Detect Win/Lose (GGST only)**（トグル）: リザルト画面の「WIN」「LOSE」テキストをOCRで自動検出し、勝敗を判定します（テンプレート画像の登録は不要です）
+- **Detect Character Names (GGST only)**（トグル）: 画面上のキャラ名をOCRで検出し、対戦キャラ別のフォルダに自動分類します
 
 > **画像登録手順**:
 > 各項目の枠（`⚠ Select Image`）をクリックして画像を選択します。

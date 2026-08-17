@@ -1,15 +1,18 @@
 [package]
 name = "ggst-clipper"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2024"
 
 [dependencies]
-directories = "6.0.0"
+directories.workspace = true
 eframe = "0.29.0"
 egui_extras = { version = "0.29.0", features = ["all_loaders"] }
-image = "0.25.10"
-rfd = "0.15.0"
+image.workspace = true
+rfd.workspace = true
 rust-ini = "0.21"
+serde.workspace = true
+serde_json.workspace = true
 
 [build-dependencies]
 winres = "0.1.12"
+

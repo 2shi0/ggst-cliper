@@ -1,3 +1,5 @@
+use serde::{Deserialize, Serialize};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BBox {
     pub x: u32,
@@ -7,9 +9,18 @@ pub struct BBox {
 }
 
 impl BBox {
+    #[allow(dead_code)]
+    pub const ZERO: Self = Self {
+        x: 0,
+        y: 0,
+        width: 0,
+        height: 0,
+    };
+
     pub fn new(x: u32, y: u32, width: u32, height: u32) -> Self {
         Self { x, y, width, height }
     }
+
 
     pub fn union(&self, other: &Self) -> Self {
         let x_min = self.x.min(other.x);
@@ -31,7 +42,7 @@ pub enum SearchState {
     SearchEnd,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum MatchResult {
     Win,
     Lose,
@@ -39,7 +50,7 @@ pub enum MatchResult {
     Skipped,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Segment {
     pub start: f64,
     pub end: f64,
@@ -53,4 +64,38 @@ pub struct VideoInfo {
     pub width: u32,
     pub height: u32,
     pub fps: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum IpcMessage {
+    Log {
+        message: String,
+    },
+    Progress {
+        phase: String,
+        current: usize,
+        total: usize,
+        percentage: f32,
+        message: String,
+    },
+    SegmentDetected {
+        index: usize,
+        start: f64,
+        end: f64,
+        result: MatchResult,
+        p1: Option<String>,
+        p2: Option<String>,
+    },
+    Done {
+        total_frames: usize,
+        segments_count: usize,
+        calc_time_secs: u64,
+        export_time_secs: u64,
+        total_time_secs: u64,
+        output_dir: String,
+    },
+    Error {
+        message: String,
+    },
 }
