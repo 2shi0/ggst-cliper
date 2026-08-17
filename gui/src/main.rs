@@ -7,6 +7,25 @@ use eframe::egui;
 use rfd::FileDialog;
 use std::process::Command;
 
+fn open_file(path: &std::path::Path) {
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        let _ = Command::new("cmd")
+            .args(["/c", "start", "", &path.to_string_lossy()])
+            .creation_flags(CREATE_NO_WINDOW)
+            .spawn();
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = Command::new("xdg-open")
+            .arg(path)
+            .spawn();
+    }
+}
+
+
 struct RoiSelectionState {
     template_type: String,
     image_path: String,
@@ -63,6 +82,9 @@ impl GgstClipApp {
         cmd.arg("--end-offset").arg(self.config.end_offset.to_string());
         cmd.arg("--win-offset").arg(self.config.win_offset.to_string());
         cmd.arg("--detect-characters").arg(self.config.detect_characters.to_string());
+        if !self.config.my_character.is_empty() && self.config.my_character != "None" {
+            cmd.arg("--my-character").arg(&self.config.my_character);
+        }
         
         let format_roi = |r: [u32; 4]| format!("{},{},{},{}", r[0], r[1], r[2], r[3]);
         cmd.arg("--start-roi").arg(format_roi(self.config.start_roi));
@@ -312,8 +334,33 @@ impl GgstClipApp {
 
                             ui.horizontal(|ui| {
                                 ui.checkbox(&mut self.config.detect_characters, "Detect Character Names (GGST only)");
-                                instant_tooltip(ui, "Detect 1P/2P character names via OCR 1s after start match\nand include them in exported video filenames.");
+                                instant_tooltip(ui, "Detect 1P/2P character names via OCR 1s after start match\nand save clips into character-specific folders.");
                             });
+
+                            if self.config.detect_characters {
+                                ui.add_space(4.0);
+                                ui.horizontal(|ui| {
+                                    if ui.button("Open Character List").clicked() {
+                                        AppConfig::ensure_characters_file();
+                                        open_file(&AppConfig::characters_path());
+                                    }
+                                    instant_tooltip(ui, "Open AppData/Roaming/ggst-clipper/characters.txt in your default text editor\nto customize the list of playable characters for OCR matching.");
+                                });
+
+                                ui.add_space(4.0);
+                                ui.horizontal(|ui| {
+                                    ui.label("My Character:");
+                                    let character_names = AppConfig::get_character_names();
+                                    egui::ComboBox::from_id_salt("my_character_combobox")
+                                        .selected_text(&self.config.my_character)
+                                        .show_ui(ui, |ui| {
+                                            for name in character_names {
+                                                ui.selectable_value(&mut self.config.my_character, name.clone(), &name);
+                                            }
+                                        });
+                                    instant_tooltip(ui, "Select the character you play.\nWhen set, exported clips will be saved into folders named after your opponent.");
+                                });
+                            }
 
                             if let Some(state) = open_roi_selection {
                                 self.roi_selection = Some(state);

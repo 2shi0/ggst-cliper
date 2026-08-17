@@ -1,6 +1,6 @@
 [package]
 name = "ggst-clipper-cui"
-version = "0.1.5"
+version = "0.2.0"
 edition = "2024"
 [dependencies]
 clap = { version = "4.4", features = ["derive"] }

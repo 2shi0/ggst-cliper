@@ -52,3 +52,28 @@ pub fn format_duration(secs: u64) -> String {
     let seconds = secs % 60;
     format!("{:02}:{:02}:{:02}", hours, minutes, seconds)
 }
+
+pub fn sanitize_filename_component(name: &str) -> String {
+    name.chars()
+        .filter(|&c| !matches!(c, '\\' | '/' | ':' | '*' | '?' | '"' | '<' | '>' | '|' | '\0'..='\x1F'))
+        .collect::<String>()
+        .trim_matches(|c: char| c.is_whitespace() || c == '.')
+        .to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_sanitize_filename_component() {
+        assert_eq!(sanitize_filename_component("BEDMAN?"), "BEDMAN");
+        assert_eq!(sanitize_filename_component("POTEMKIN"), "POTEMKIN");
+        assert_eq!(sanitize_filename_component("ASUKA R#"), "ASUKA R#");
+        assert_eq!(sanitize_filename_component("A.B.A"), "A.B.A");
+        assert_eq!(sanitize_filename_component("A.B.A."), "A.B.A");
+        assert_eq!(sanitize_filename_component("?*:<>|/\\"), "");
+        assert_eq!(sanitize_filename_component("  BEDMAN?  "), "BEDMAN");
+    }
+}
+

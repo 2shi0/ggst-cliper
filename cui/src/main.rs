@@ -19,7 +19,7 @@ use ffmpeg::{
     check_and_install_ffmpeg, export_segments_ffmpeg, extract_frame_roi, find_exact_boundary, find_match_result, get_video_duration,
     get_video_info,
 };
-use image_proc::{compute_similarity_zero_copy, extract_roi, compute_template_stats};
+use image_proc::{compute_similarity_zero_copy, scale_and_crop_template};
 use ocr::{get_default_character_rois, GGSTDetector};
 use types::{BBox, SearchState, Segment};
 use utils::{format_duration, pause, resolve_template_path};
@@ -80,6 +80,17 @@ fn main() {
     println!("[Input Video]: {}", input_path);
     println!("[Output Directory]: {}", output_dir.display());
 
+    let video_info = match get_video_info(&input_path) {
+        Some(info) => info,
+        None => {
+            println!("Error: Failed to get video info. Is FFmpeg installed and working?");
+            pause();
+            return;
+        }
+    };
+    let duration = get_video_duration(&input_path).unwrap_or(0.0);
+    let total_frames = (duration * video_info.fps) as usize;
+
     let parse_roi = |s: Option<&String>| -> Option<BBox> {
         if let Some(s) = s {
             let parts: Vec<&str> = s.split(',').collect();
@@ -99,7 +110,7 @@ fn main() {
         None
     };
 
-    // 1. ROI Calculation
+    // 1. Template Loading and Auto-Scaling
     println!("\nLoading start template: {}", start_tmpl_path);
     let start_img = match image::open(&start_tmpl_path) {
         Ok(img) => img,
@@ -109,8 +120,16 @@ fn main() {
             return;
         }
     };
-    let start_bbox = parse_roi(args.start_roi.as_ref()).unwrap_or_else(|| BBox::new(0, 0, start_img.width(), start_img.height()));
-    println!("Start ROI (x,y,w,h): {:?}", start_bbox);
+    let raw_start_bbox = parse_roi(args.start_roi.as_ref()).unwrap_or_else(|| BBox::new(0, 0, start_img.width(), start_img.height()));
+    let (start_bbox, start_tmpl, start_stats) = scale_and_crop_template(&start_img, raw_start_bbox, video_info.width, video_info.height);
+    if start_img.width() != video_info.width || start_img.height() != video_info.height {
+        println!(
+            "[Scale]: Start template auto-scaled from {}x{} to video {}x{} (ROI: {:?} -> {:?})",
+            start_img.width(), start_img.height(), video_info.width, video_info.height, raw_start_bbox, start_bbox
+        );
+    } else {
+        println!("Start ROI (x,y,w,h): {:?}", start_bbox);
+    }
 
     println!("Loading end template: {}", end_tmpl_path);
     let end_img = match image::open(&end_tmpl_path) {
@@ -121,37 +140,33 @@ fn main() {
             return;
         }
     };
-    let end_bbox = parse_roi(args.end_roi.as_ref()).unwrap_or_else(|| BBox::new(0, 0, end_img.width(), end_img.height()));
-    println!("End ROI (x,y,w,h): {:?}", end_bbox);
-
-    // 2. Crop Templates
-    println!("\nCropping templates...");
-    let start_tmpl = extract_roi(
-        start_img.to_rgb8().as_raw(),
-        start_img.width(),
-        start_img.height(),
-        start_bbox,
-    );
-    let end_tmpl = extract_roi(
-        end_img.to_rgb8().as_raw(),
-        end_img.width(),
-        end_img.height(),
-        end_bbox,
-    );
-
-    let start_stats = compute_template_stats(&start_tmpl);
-    let end_stats = compute_template_stats(&end_tmpl);
+    let raw_end_bbox = parse_roi(args.end_roi.as_ref()).unwrap_or_else(|| BBox::new(0, 0, end_img.width(), end_img.height()));
+    let (end_bbox, end_tmpl, end_stats) = scale_and_crop_template(&end_img, raw_end_bbox, video_info.width, video_info.height);
+    if end_img.width() != video_info.width || end_img.height() != video_info.height {
+        println!(
+            "[Scale]: End template auto-scaled from {}x{} to video {}x{} (ROI: {:?} -> {:?})",
+            end_img.width(), end_img.height(), video_info.width, video_info.height, raw_end_bbox, end_bbox
+        );
+    } else {
+        println!("End ROI (x,y,w,h): {:?}", end_bbox);
+    }
 
     let (mut win_bbox_opt, mut win_tmpl_opt, mut win_stats_opt) = (None, None, None);
     if Path::new(&win_tmpl_path).exists() {
         if let Ok(img) = image::open(&win_tmpl_path) {
-            if let Some(bbox) = parse_roi(args.win_roi.as_ref()) {
-                let tmpl = extract_roi(img.to_rgb8().as_raw(), img.width(), img.height(), bbox);
-                let stats = compute_template_stats(&tmpl);
+            if let Some(raw_bbox) = parse_roi(args.win_roi.as_ref()) {
+                let (bbox, tmpl, stats) = scale_and_crop_template(&img, raw_bbox, video_info.width, video_info.height);
+                if img.width() != video_info.width || img.height() != video_info.height {
+                    println!(
+                        "[Scale]: Win template auto-scaled from {}x{} to video {}x{} (ROI: {:?} -> {:?})",
+                        img.width(), img.height(), video_info.width, video_info.height, raw_bbox, bbox
+                    );
+                } else {
+                    println!("Win ROI (x,y,w,h): {:?}", bbox);
+                }
                 win_bbox_opt = Some(bbox);
                 win_tmpl_opt = Some(tmpl);
                 win_stats_opt = Some(stats);
-                println!("Win ROI (x,y,w,h): {:?}", bbox);
             } else {
                 println!("Win ROI not set or invalid (0,0,0,0). Win detection skipped.");
             }
@@ -163,13 +178,19 @@ fn main() {
     let (mut lose_bbox_opt, mut lose_tmpl_opt, mut lose_stats_opt) = (None, None, None);
     if Path::new(&lose_tmpl_path).exists() {
         if let Ok(img) = image::open(&lose_tmpl_path) {
-            if let Some(bbox) = parse_roi(args.lose_roi.as_ref()) {
-                let tmpl = extract_roi(img.to_rgb8().as_raw(), img.width(), img.height(), bbox);
-                let stats = compute_template_stats(&tmpl);
+            if let Some(raw_bbox) = parse_roi(args.lose_roi.as_ref()) {
+                let (bbox, tmpl, stats) = scale_and_crop_template(&img, raw_bbox, video_info.width, video_info.height);
+                if img.width() != video_info.width || img.height() != video_info.height {
+                    println!(
+                        "[Scale]: Lose template auto-scaled from {}x{} to video {}x{} (ROI: {:?} -> {:?})",
+                        img.width(), img.height(), video_info.width, video_info.height, raw_bbox, bbox
+                    );
+                } else {
+                    println!("Lose ROI (x,y,w,h): {:?}", bbox);
+                }
                 lose_bbox_opt = Some(bbox);
                 lose_tmpl_opt = Some(tmpl);
                 lose_stats_opt = Some(stats);
-                println!("Lose ROI (x,y,w,h): {:?}", bbox);
             } else {
                 println!("Lose ROI not set or invalid (0,0,0,0). Lose detection skipped.");
             }
@@ -192,18 +213,8 @@ fn main() {
         end_bbox.height,
     );
 
-    // 3. Scan video
+    // 2. OCR and Scan Preparation
     let calc_start = Instant::now();
-    let video_info = match get_video_info(&input_path) {
-        Some(info) => info,
-        None => {
-            println!("Error: Failed to get video info. Is FFmpeg installed and working?");
-            pause();
-            return;
-        }
-    };
-    let duration = get_video_duration(&input_path).unwrap_or(0.0);
-    let total_frames = (duration * video_info.fps) as usize;
 
     let (def_p1_roi, def_p2_roi) = get_default_character_rois(video_info.width, video_info.height);
     let p1_roi = parse_roi(args.p1_roi.as_ref()).unwrap_or(def_p1_roi);
@@ -332,12 +343,12 @@ fn main() {
                     start_time = Some(adjusted_time);
                     state = SearchState::SearchEnd;
 
-                    // Character Name Detection 1.0s after exact start
+                    // Character Name Detection ~2.0s after exact start (when character names are clear on HUD)
                     let mut p1_detected = None;
                     let mut p2_detected = None;
 
                     if let Some(ref mut detector) = detector_opt {
-                        let probe_time = exact_time + 1.0;
+                        let probe_time = exact_time + 2.0;
                         if let Some(p1_img) = extract_frame_roi(&input_path, probe_time, p1_roi) {
                             if let Ok(Some((name, conf))) = detector.detect_and_recognize(&p1_img) {
                                 p1_detected = Some((name.to_string(), conf));
@@ -349,9 +360,12 @@ fn main() {
                             }
                         }
 
-                        // Retry 60 frames later if either character was not detected
-                        if p1_detected.is_none() || p2_detected.is_none() {
-                            let retry_time = probe_time + (60.0 / video_info.fps);
+                        // Retry up to 6 times (every 0.5s) if either character was not detected
+                        for retry_count in 1..=6 {
+                            if p1_detected.is_some() && p2_detected.is_some() {
+                                break;
+                            }
+                            let retry_time = probe_time + (0.5 * retry_count as f64);
                             if p1_detected.is_none() {
                                 if let Some(p1_img) = extract_frame_roi(&input_path, retry_time, p1_roi) {
                                     if let Ok(Some((name, conf))) = detector.detect_and_recognize(&p1_img) {
@@ -501,7 +515,7 @@ fn main() {
 
     // 4. Trimming with FFmpeg
     let export_start = Instant::now();
-    export_segments_ffmpeg(&input_path, &segments, &output_dir);
+    export_segments_ffmpeg(&input_path, &segments, &output_dir, args.my_character.as_deref());
     let export_duration = export_start.elapsed();
 
     let calc_secs = calc_duration.as_secs();

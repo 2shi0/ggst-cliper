@@ -1,6 +1,6 @@
 use crate::image_proc::{compute_similarity_zero_copy, TemplateStats};
 use crate::types::{BBox, MatchResult, Segment, VideoInfo};
-use crate::utils::pause;
+use crate::utils::{pause, sanitize_filename_component};
 use std::fs;
 use std::io::Read;
 use std::path::Path;
@@ -275,7 +275,60 @@ pub fn extract_frame_roi(input_path: &str, time_sec: f64, bbox: BBox) -> Option<
     image::RgbImage::from_raw(bbox.width, bbox.height, buffer)
 }
 
-pub fn export_segments_ffmpeg(input: &str, segments: &[Segment], out_dir: &Path) {
+pub fn get_character_dir_name(
+    p1: Option<&str>,
+    p2: Option<&str>,
+    my_character: Option<&str>,
+) -> Option<String> {
+    let my_char = my_character
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty() && !s.eq_ignore_ascii_case("none"));
+
+    match my_char {
+        Some(my_char) => {
+            let p1_is_my_char = p1.map(|n| n.eq_ignore_ascii_case(my_char)).unwrap_or(false);
+            let p2_is_my_char = p2.map(|n| n.eq_ignore_ascii_case(my_char)).unwrap_or(false);
+
+            if p1_is_my_char && p2_is_my_char {
+                // Mirror match (e.g. POTEMKIN vs POTEMKIN)
+                Some(my_char.to_string())
+            } else if p1_is_my_char {
+                // 1P is me -> Opponent is 2P
+                match p2 {
+                    Some(opp) => Some(opp.to_string()),
+                    None => Some("Unknown".to_string()),
+                }
+            } else if p2_is_my_char {
+                // 2P is me -> Opponent is 1P
+                match p1 {
+                    Some(opp) => Some(opp.to_string()),
+                    None => Some("Unknown".to_string()),
+                }
+            } else {
+                // Neither 1P nor 2P matches my_char
+                match (p1, p2) {
+                    (Some(p1), Some(p2)) => Some(format!("{}-vs-{}", p1, p2)),
+                    (Some(p1), None) => Some(p1.to_string()),
+                    (None, Some(p2)) => Some(p2.to_string()),
+                    (None, None) => None,
+                }
+            }
+        }
+        None => match (p1, p2) {
+            (Some(p1), Some(p2)) => Some(format!("{}-vs-{}", p1, p2)),
+            (Some(p1), None) => Some(format!("{}-vs-Unknown", p1)),
+            (None, Some(p2)) => Some(format!("Unknown-vs-{}", p2)),
+            (None, None) => None,
+        },
+    }
+}
+
+pub fn export_segments_ffmpeg(
+    input: &str,
+    segments: &[Segment],
+    out_dir: &Path,
+    my_character: Option<&str>,
+) {
     if segments.is_empty() {
         println!("No segments found to export.");
         return;
@@ -284,10 +337,16 @@ pub fn export_segments_ffmpeg(input: &str, segments: &[Segment], out_dir: &Path)
     println!("\nExporting {} segment(s)...", segments.len());
 
     let input_path = Path::new(input);
-    let file_stem = input_path
+    let raw_file_stem = input_path
         .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or("output");
+    let clean_file_stem = sanitize_filename_component(raw_file_stem);
+    let file_stem = if clean_file_stem.is_empty() {
+        "output"
+    } else {
+        &clean_file_stem
+    };
 
     for (i, seg) in segments.iter().enumerate() {
         let prefix = match seg.result {
@@ -296,14 +355,31 @@ pub fn export_segments_ffmpeg(input: &str, segments: &[Segment], out_dir: &Path)
             MatchResult::Unknown => "unknown-",
             MatchResult::Skipped => "",
         };
-        let char_suffix = match (&seg.p1_name, &seg.p2_name) {
-            (Some(p1), Some(p2)) => format!("-{}-vs-{}", p1, p2),
-            (Some(p1), None) => format!("-{}-vs-Unknown", p1),
-            (None, Some(p2)) => format!("-Unknown-vs-{}", p2),
-            (None, None) => "".to_string(),
+        let p1_clean = seg
+            .p1_name
+            .as_deref()
+            .map(sanitize_filename_component)
+            .filter(|s| !s.is_empty());
+        let p2_clean = seg
+            .p2_name
+            .as_deref()
+            .map(sanitize_filename_component)
+            .filter(|s| !s.is_empty());
+        let char_dir_name =
+            get_character_dir_name(p1_clean.as_deref(), p2_clean.as_deref(), my_character);
+        let target_dir = match &char_dir_name {
+            Some(dir_name) => {
+                let d = out_dir.join(dir_name);
+                let _ = fs::create_dir_all(&d);
+                d
+            }
+            None => {
+                let _ = fs::create_dir_all(out_dir);
+                out_dir.to_path_buf()
+            }
         };
-        let out_name = format!("{}{}{}-part{:03}.mp4", prefix, file_stem, char_suffix, i + 1);
-        let out_path = out_dir.join(out_name);
+        let out_name = format!("{}{}-part{:03}.mp4", prefix, file_stem, i + 1);
+        let out_path = target_dir.join(out_name);
         let mut cmd = Command::new("ffmpeg");
         let start_str = format!("{:.3}", seg.start);
         let end_str = format!("{:.3}", seg.end);
@@ -364,3 +440,88 @@ pub fn export_segments_ffmpeg(input: &str, segments: &[Segment], out_dir: &Path)
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_get_character_dir_name_no_my_character() {
+        assert_eq!(
+            get_character_dir_name(Some("POTEMKIN"), Some("FAUST"), None),
+            Some("POTEMKIN-vs-FAUST".to_string())
+        );
+        assert_eq!(
+            get_character_dir_name(Some("POTEMKIN"), None, None),
+            Some("POTEMKIN-vs-Unknown".to_string())
+        );
+        assert_eq!(
+            get_character_dir_name(None, Some("FAUST"), None),
+            Some("Unknown-vs-FAUST".to_string())
+        );
+        assert_eq!(get_character_dir_name(None, None, None), None);
+
+        // "None" string should behave the same as None
+        assert_eq!(
+            get_character_dir_name(Some("POTEMKIN"), Some("FAUST"), Some("None")),
+            Some("POTEMKIN-vs-FAUST".to_string())
+        );
+        assert_eq!(
+            get_character_dir_name(Some("POTEMKIN"), Some("FAUST"), Some("")),
+            Some("POTEMKIN-vs-FAUST".to_string())
+        );
+    }
+
+    #[test]
+    fn test_get_character_dir_name_with_my_character() {
+        // When I am 1P, opponent is 2P
+        assert_eq!(
+            get_character_dir_name(Some("POTEMKIN"), Some("FAUST"), Some("POTEMKIN")),
+            Some("FAUST".to_string())
+        );
+        assert_eq!(
+            get_character_dir_name(Some("potemkin"), Some("FAUST"), Some("POTEMKIN")),
+            Some("FAUST".to_string())
+        );
+
+        // When I am 2P, opponent is 1P
+        assert_eq!(
+            get_character_dir_name(Some("FAUST"), Some("POTEMKIN"), Some("POTEMKIN")),
+            Some("FAUST".to_string())
+        );
+
+        // Mirror match
+        assert_eq!(
+            get_character_dir_name(Some("POTEMKIN"), Some("POTEMKIN"), Some("POTEMKIN")),
+            Some("POTEMKIN".to_string())
+        );
+
+        // I am 1P, opponent OCR failed
+        assert_eq!(
+            get_character_dir_name(Some("POTEMKIN"), None, Some("POTEMKIN")),
+            Some("Unknown".to_string())
+        );
+
+        // Opponent is 1P, my OCR failed (or I am 2P)
+        assert_eq!(
+            get_character_dir_name(Some("FAUST"), None, Some("POTEMKIN")),
+            Some("FAUST".to_string())
+        );
+
+        // Opponent is 2P, my OCR failed (or I am 1P)
+        assert_eq!(
+            get_character_dir_name(None, Some("FAUST"), Some("POTEMKIN")),
+            Some("FAUST".to_string())
+        );
+
+        // Neither matches my character (both detected)
+        assert_eq!(
+            get_character_dir_name(Some("KY"), Some("SOL"), Some("POTEMKIN")),
+            Some("KY-vs-SOL".to_string())
+        );
+
+        // Both None
+        assert_eq!(get_character_dir_name(None, None, Some("POTEMKIN")), None);
+    }
+}
+

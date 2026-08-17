@@ -64,4 +64,8 @@ pub struct Args {
 
     #[arg(long)]
     pub p2_roi: Option<String>,
+
+    #[arg(long)]
+    pub my_character: Option<String>,
 }
+

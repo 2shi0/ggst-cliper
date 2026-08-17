@@ -9,6 +9,7 @@ pub struct AppConfig {
     pub lose_template: String,
     pub detect_win_loss: bool,
     pub detect_characters: bool,
+    pub my_character: String,
     pub threshold: f32,
     pub step_frames: u32,
     pub start_offset: i32,
@@ -30,6 +31,7 @@ impl Default for AppConfig {
             lose_template: "lose.png".to_string(),
             detect_win_loss: true,
             detect_characters: true,
+            my_character: "None".to_string(),
             threshold: 0.9,
             step_frames: 60,
             start_offset: 0,
@@ -61,7 +63,51 @@ impl AppConfig {
         dir.join("config.ini")
     }
 
+    pub fn characters_path() -> PathBuf {
+        Self::config_dir().join("characters.txt")
+    }
+
+    pub fn ensure_characters_file() {
+        let path = Self::characters_path();
+        if !path.exists() {
+            let dir = Self::config_dir();
+            if !dir.exists() {
+                let _ = std::fs::create_dir_all(&dir);
+            }
+            let default_text = include_str!("../../assets/models/characters.txt");
+            let _ = std::fs::write(&path, default_text);
+        }
+    }
+
+    pub fn get_character_names() -> Vec<String> {
+        Self::ensure_characters_file();
+        let path = Self::characters_path();
+        let content = std::fs::read_to_string(&path)
+            .unwrap_or_else(|_| include_str!("../../assets/models/characters.txt").to_string());
+
+        let mut names = vec!["None".to_string()];
+        for line in content.lines() {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') || line.starts_with("//") {
+                continue;
+            }
+            let canonical = if let Some(idx) = line.find(':') {
+                &line[..idx]
+            } else if let Some(idx) = line.find('=') {
+                &line[..idx]
+            } else {
+                line
+            };
+            let canonical = canonical.trim();
+            if !canonical.is_empty() && !names.iter().any(|n| n.eq_ignore_ascii_case(canonical)) {
+                names.push(canonical.to_string());
+            }
+        }
+        names
+    }
+
     pub fn load() -> Self {
+        Self::ensure_characters_file();
         let path = Self::config_path();
         let mut config = Self::default();
 
@@ -77,6 +123,7 @@ impl AppConfig {
                 if let Some(val) = section.get("detect_characters") {
                     if let Ok(v) = val.parse::<bool>() { config.detect_characters = v; }
                 }
+                if let Some(val) = section.get("my_character") { config.my_character = val.to_string(); }
                 
                 if let Some(val) = section.get("threshold") { 
                     if let Ok(v) = val.parse::<f32>() { config.threshold = v; } 
@@ -126,6 +173,7 @@ impl AppConfig {
             .set("lose_template", &self.lose_template)
             .set("detect_win_loss", self.detect_win_loss.to_string())
             .set("detect_characters", self.detect_characters.to_string())
+            .set("my_character", &self.my_character)
             .set("threshold", self.threshold.to_string())
             .set("step_frames", self.step_frames.to_string())
             .set("start_offset", self.start_offset.to_string())
@@ -140,3 +188,4 @@ impl AppConfig {
         let _ = conf.write_to_file(&path);
     }
 }
+
